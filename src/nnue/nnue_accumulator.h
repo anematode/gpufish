@@ -98,18 +98,15 @@ struct AccumulatorCaches {
     template<typename Networks>
     void clear(const Networks& networks) {
         big.clear(networks.big);
-        small.clear(networks.small);
     }
 
     Cache<TransformedFeatureDimensionsBig>   big;
-    Cache<TransformedFeatureDimensionsSmall> small;
 };
 
 
 template<typename FeatureSet>
 struct AccumulatorState {
     Accumulator<TransformedFeatureDimensionsBig>   accumulatorBig;
-    Accumulator<TransformedFeatureDimensionsSmall> accumulatorSmall;
     typename FeatureSet::DiffType                  diff;
 
     template<IndexType Size>
@@ -120,8 +117,6 @@ struct AccumulatorState {
 
         if constexpr (Size == TransformedFeatureDimensionsBig)
             return accumulatorBig;
-        else if constexpr (Size == TransformedFeatureDimensionsSmall)
-            return accumulatorSmall;
     }
 
     template<IndexType Size>
@@ -132,19 +127,15 @@ struct AccumulatorState {
 
         if constexpr (Size == TransformedFeatureDimensionsBig)
             return accumulatorBig;
-        else if constexpr (Size == TransformedFeatureDimensionsSmall)
-            return accumulatorSmall;
     }
 
     void reset(const typename FeatureSet::DiffType& dp) noexcept {
         diff = dp;
         accumulatorBig.computed.fill(false);
-        accumulatorSmall.computed.fill(false);
     }
 
     typename FeatureSet::DiffType& reset() noexcept {
         accumulatorBig.computed.fill(false);
-        accumulatorSmall.computed.fill(false);
         return diff;
     }
 };

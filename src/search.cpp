@@ -189,17 +189,15 @@ void Worker::yield_to_next() {
     if (disable_yielding) return;
 
     auto* thread = myThread;
-    size_t index = workerIdx;
-
-    do
-    {
-        index = (index + 1) % thread->workers.size();
+    // cycle through other threads to find a yield target
+    for (size_t i = 1; i < thread->workers.size(); i++) {
+        size_t index = (workerIdx + 1) % thread->workers.size();
         if (thread->workers[index]->is_active)
         {
             swapcontext(&activeContext, &thread->workers[index]->activeContext);
             return;
         }
-    } while (index != workerIdx);
+    }
 }
 
 void Search::Worker::start_searching() {

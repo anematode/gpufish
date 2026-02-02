@@ -247,13 +247,13 @@ void Search::Worker::start_searching() {
         worker->disable_yielding = true;
         if (worker->is_active)
         {
-            std::cout << "Worker " << worker->workerIdx << " is active!\n";
+//            std::cout << "Worker " << worker->workerIdx << " is active!\n";
         }
         return worker->is_active;
     }))
     {
         disable_yielding = false;
-        std::cout << "back here!\n";
+//        std::cout << "back here!\n";
         yield_to_next();
     }
 

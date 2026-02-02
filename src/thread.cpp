@@ -42,7 +42,7 @@
 
 namespace Stockfish {
 
-const int WorkersPerThread = 1;
+const int WorkersPerThread = 8;
 
 // Constructor launches the thread and waits until it goes to sleep
 // in idle_loop(). Note that 'searching' and 'exit' should be already set.
@@ -101,7 +101,7 @@ static void start_searching_fwd(int idx) {
     worker->start_searching();
     worker->is_active = false;
 
-    std::cout << "Worker finished searching: " << worker->threadIdx << '\n';
+    std::cout << "Worker finished searching: " << worker->workerIdx << '\n';
 }
 
 std::mutex mtx;

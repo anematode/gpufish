@@ -115,9 +115,10 @@ std::mutex mtx;
 // Wakes up the thread that will start the search
 void Thread::start_searching() {
     // assert(worker != nullptr);
-    ucontext_t main;
 
-    run_custom_job([this, &main]() {
+    run_custom_job([this]() {
+        ucontext_t main;
+
         curr_thread = this;
         for (size_t i = 0; i < workers.size(); ++i)
         {

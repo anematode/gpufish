@@ -102,6 +102,12 @@ static void start_searching_fwd(int idx) {
     worker->is_active = false;
 
     std::cout << "Worker finished searching: " << worker->workerIdx << '\n';
+    if (getcontext(&worker->activeContext) == -1)
+    {
+        perror("getcontext 2");
+        abort();
+    }
+    std::cout << "Worker exiting: " << worker->workerIdx << '\n';
 }
 
 std::mutex mtx;
@@ -132,6 +138,7 @@ void Thread::start_searching() {
             makecontext(&worker->activeContext, reinterpret_cast<void(*)()>(&start_searching_fwd), 1, (int)i);
         }
 
+        // invoke a worker
         if (swapcontext(&main, &workers[0].get()->activeContext) == -1)
         {
             perror("swapcontext 1");
@@ -150,6 +157,12 @@ void Thread::start_searching() {
                 abort();
             }
         }
+        std::cout << "Thread::start_searching at end; doing some checks\n";
+        for (auto & worker : workers)
+        {
+            std::cout << " - worker_ptr: " << worker.get() << " idx: " << worker->workerIdx << " is_active: " << (worker->is_active ? 1 : 0) << "\n";
+        }
+        std::cout << "Thread::start_searching exiting\n";
     });
 }
 

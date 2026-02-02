@@ -243,19 +243,31 @@ void Search::Worker::start_searching() {
 
     std::cout << "Main thread waiting for search finished!\n";
 
-    while (std::any_of(myThread->workers.begin() + 1, myThread->workers.end(), [&] (LargePagePtr<Search::Worker>& worker) {
-        worker->disable_yielding = true;
-        if (worker->is_active)
-        {
-//            std::cout << "Worker " << worker->workerIdx << " is active!\n";
-        }
-        return worker->is_active;
-    }))
+    // yield for all workers to finish
+    for (;;)
     {
+        bool has_more = false;
+        for (size_t i = 0; i < myThread->workers.size(); i++) {
+            size_t index = (workerIdx + 1) % myThread->workers.size();
+            auto & the_worker = myThread->workers[index];
+            the_worker->disable_yielding = true;
+            if (the_worker->is_active)
+            {
+                std::cout << "Worker " << the_worker->workerIdx << " is active!\n";
+            }
+            if (the_worker->is_active) {
+                has_more = true;
+                break;
+            }
+        }
+        std::cout << "has more: " << has_more << "...\n";
+        if (!has_more) break;
+
         disable_yielding = false;
-//        std::cout << "back here!\n";
+        std::cout << "back here! i am active: " << is_active << " - yielding.\n";
         yield_to_next();
     }
+    std::cout << "Finished scheduling all workers, now waiting for the threads;\n";
 
     // Wait until all threads have finished
     threads.wait_for_search_finished();

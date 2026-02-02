@@ -32,6 +32,7 @@
 #include "../misc.h"
 #include "../position.h"
 #include "../types.h"
+#include "../search.h"
 #include "nnue_architecture.h"
 #include "nnue_common.h"
 #include "nnue_misc.h"
@@ -172,9 +173,15 @@ template<typename Arch, typename Transformer>
 NetworkOutput
 Network<Arch, Transformer>::evaluate(const Position&                         pos,
                                      AccumulatorStack&                       accumulatorStack,
-                                     AccumulatorCaches::Cache<FTDimensions>& cache) const {
+                                     AccumulatorCaches::Cache<FTDimensions>& cache,
+                                     Search::Worker* worker) const {
+
 
     constexpr uint64_t alignment = CacheLineSize;
+    if (worker)
+    {
+        worker->yield_to_next();
+    }
 
     alignas(alignment)
       TransformedFeatureType transformedFeatures[FeatureTransformer<FTDimensions>::BufferSize];

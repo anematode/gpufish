@@ -31,6 +31,7 @@
 #include <list>
 #include <ratio>
 #include <string>
+#include <ucontext.h>
 #include <utility>
 
 #include "bitboard.h"
@@ -156,12 +157,15 @@ bool is_shuffling(Move move, Stack* const ss, const Position& pos) {
 Search::Worker::Worker(SharedState&              sharedState,
                        ISearchManager&           sm,
                        size_t                    threadId,
+                       size_t                    workerId,
                        size_t                    numaThreadId,
                        size_t                    numaTotalThreads,
-                       NumaReplicatedAccessToken token) :
+                       NumaReplicatedAccessToken token,
+                       Thread* myThread) :
     // Unpack the SharedState struct into member variables
     sharedHistory(sharedState.sharedHistories.at(token.get_numa_index())),
     threadIdx(threadId),
+    workerIdx(workerId),
     numaThreadIdx(numaThreadId),
     numaTotal(numaTotalThreads),
     numaAccessToken(token),
@@ -170,7 +174,8 @@ Search::Worker::Worker(SharedState&              sharedState,
     threads(sharedState.threads),
     tt(sharedState.tt),
     networks(sharedState.networks),
-    refreshTable(networks[token]) {
+    refreshTable(networks[token]),
+    myThread(myThread) {
     clear();
 }
 
@@ -180,8 +185,24 @@ void Search::Worker::ensure_network_replicated() {
     (void) (networks[numaAccessToken]);
 }
 
-void Search::Worker::start_searching() {
+void Worker::yield_to_next() {
+    if (disable_yielding) return;
 
+    auto* thread = myThread;
+    size_t index = workerIdx;
+
+    do
+    {
+        index = (index + 1) % thread->workers.size();
+        if (thread->workers[index]->is_active)
+        {
+            swapcontext(&activeContext, &thread->workers[index]->activeContext);
+            return;
+        }
+    } while (index != workerIdx);
+}
+
+void Search::Worker::start_searching() {
     accumulatorStack.reset();
 
     // Non-main threads go directly to iterative_deepening()
@@ -190,6 +211,8 @@ void Search::Worker::start_searching() {
         iterative_deepening();
         return;
     }
+
+    std::cout << "Main thread started searching!\n";
 
     main_manager()->tm.init(limits, rootPos.side_to_move(), rootPos.game_ply(), options,
                             main_manager()->originalTimeAdjust);
@@ -205,6 +228,7 @@ void Search::Worker::start_searching() {
     {
         threads.start_searching();  // start non-main threads
         iterative_deepening();      // main thread start searching
+        std::cout << "Main thread done with ID!\n";
     }
 
     // When we reach the maximum depth, we can arrive here without a raise of
@@ -219,8 +243,19 @@ void Search::Worker::start_searching() {
     // "ponderhit" just reset threads.ponder)
     threads.stop = true;
 
+    std::cout << "Main thread waiting for search finished!\n";
+
+    while (std::any_of(myThread->workers.begin() + 1, myThread->workers.end(), [&] (LargePagePtr<Search::Worker>& worker) {
+        worker->disable_yielding = true;
+        return worker->is_active;
+    }))
+    {
+        yield_to_next();
+    }
+
     // Wait until all threads have finished
     threads.wait_for_search_finished();
+    std::cout << "Main thread waited for search finished!\n";
 
     // When playing in 'nodes as time' mode, subtract the searched nodes from
     // the available ones before exiting.
@@ -235,6 +270,8 @@ void Search::Worker::start_searching() {
     if (int(options["MultiPV"]) == 1 && !limits.depth && !limits.mate && !skill.enabled()
         && rootMoves[0].pv[0] != Move::none())
         bestThread = threads.get_best_worker();
+
+    std::cout << "POOOOOP!\n";
 
     main_manager()->bestPreviousScore        = bestThread->rootMoves[0].score;
     main_manager()->bestPreviousAverageScore = bestThread->rootMoves[0].averageScore;
@@ -251,6 +288,9 @@ void Search::Worker::start_searching() {
 
     auto bestmove = UCIEngine::move(bestThread->rootMoves[0].pv[0], rootPos.is_chess960());
     main_manager()->updates.onBestmove(bestmove, ponder);
+
+    std::cout << "GOOSSE!\n";
+
 }
 
 // Main iterative deepening loop. It calls search()
@@ -533,6 +573,8 @@ void Search::Worker::iterative_deepening() {
         mainThread->iterValue[iterIdx] = bestValue;
         iterIdx                        = (iterIdx + 1) & 3;
     }
+
+    std::cout << "Finished: " << threadIdx << ':' << workerIdx << '\n';
 
     if (!mainThread)
         return;
@@ -1756,7 +1798,7 @@ TimePoint Search::Worker::elapsed_time() const { return main_manager()->tm.elaps
 
 Value Search::Worker::evaluate(const Position& pos) {
     return Eval::evaluate(networks[numaAccessToken], pos, accumulatorStack, refreshTable,
-                          optimism[pos.side_to_move()]);
+                          optimism[pos.side_to_move()], this);
 }
 
 namespace {

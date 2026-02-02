@@ -39,6 +39,7 @@
 
 namespace Stockfish {
 class Position;
+namespace Search { class Worker; }
 }
 
 namespace Stockfish::Eval::NNUE {
@@ -74,7 +75,8 @@ class Network {
 
     NetworkOutput evaluate(const Position&                         pos,
                            AccumulatorStack&                       accumulatorStack,
-                           AccumulatorCaches::Cache<FTDimensions>& cache) const;
+                           AccumulatorCaches::Cache<FTDimensions>& cache,
+                           Search::Worker* thread = nullptr) const;
 
 
     void verify(std::string evalfilePath, const std::function<void(std::string_view)>&) const;

@@ -38,6 +38,8 @@
 #include "uci.h"
 #include "ucioption.h"
 
+#include <ucontext.h>
+
 namespace Stockfish {
 
 const int WorkersPerThread = 8;
@@ -69,7 +71,7 @@ Thread::Thread(Search::SharedState&                    sharedState,
         for (int i = 0; i < WorkersPerThread; ++i)
         {
             this->workers.push_back(make_unique_large_page<Search::Worker>(
-              sharedState, *searchManager, n, idxInNuma, totalNuma, this->numaAccessToken));
+              sharedState, *searchManager, n, i, idxInNuma, totalNuma, this->numaAccessToken, this));
         }
     });
 
@@ -88,15 +90,63 @@ Thread::~Thread() {
     stdThread.join();
 }
 
+static void start_searching_fwd(Search::Worker* worker) {
+    sf_assume(worker != nullptr);
+
+    worker->start_searching();
+    worker->is_active = false;
+}
+
 // Wakes up the thread that will start the search
 void Thread::start_searching() {
-    assert(worker != nullptr);
-    run_custom_job([this]() { workers[0]->start_searching(); });
+    // assert(worker != nullptr);
+    ucontext_t main;
+
+    run_custom_job([this, &main]() {
+        for (volatile size_t i = 0; i < workers.size(); ++i)
+        {
+            auto& context = workers.at(i)->activeContext;
+            if (getcontext(&context) == -1)
+            {
+                perror("getcontext");
+                abort();
+            }
+            auto& worker = workers.at(i);
+            context.uc_link = &main;
+            context.uc_stack.ss_size = worker->contextStack.size;
+            context.uc_stack.ss_sp = worker->contextStack.mem;
+
+            worker->is_active = true;
+            worker->disable_yielding = false;
+
+            makecontext(&worker->activeContext,
+                reinterpret_cast<void(*)()>(&start_searching_fwd), 1, worker.get());
+        }
+
+        if (swapcontext(&main, &workers[0].get()->activeContext) == -1)
+        {
+            perror("swapcontext 1");
+            abort();
+        }
+
+        // Iterate over all workers and step all active ones to completion
+        for (auto & worker : workers)
+        {
+            worker->disable_yielding = true;
+            if (!worker->is_active) continue;
+
+            if (swapcontext(&main, &worker.get()->activeContext) == -1)
+            {
+                perror("swapcontext 2");
+                abort();
+            }
+        }
+    });
 }
 
 // Clears the histories for the thread worker (usually before a new game)
 void Thread::clear_worker() {
-    assert(worker != nullptr);
+    //assert(worker != nullptr);
     run_custom_job([this]() {
         for (auto& worker : workers)
             worker->clear();

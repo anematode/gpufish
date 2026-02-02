@@ -55,6 +55,7 @@ enum NodeType {
 class TranspositionTable;
 class ThreadPool;
 class OptionsMap;
+class Thread;
 
 namespace Search {
 
@@ -262,12 +263,38 @@ class NullSearchManager: public ISearchManager {
     void check_time(Search::Worker&) override {}
 };
 
+struct CustomStack {
+    static constexpr size_t StackSize = 1 << 23;
+
+    void* mem;
+    const size_t size;
+
+    CustomStack(size_t s = StackSize) : size(s) {
+        mem = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        if (mem == MAP_FAILED)
+        {
+            perror("map failed");
+            abort();
+        }
+        madvise(mem, StackSize, MADV_HUGEPAGE);
+    }
+
+    ~CustomStack() {
+        if (!mem) return;
+
+        munmap(mem, size);
+        mem = nullptr;
+    }
+};
+
 // Search::Worker is the class that does the actual search.
 // It is instantiated once per thread, and it is responsible for keeping track
 // of the search history, and storing data required for the search.
 class Worker {
    public:
-    Worker(SharedState&, ISearchManager&, size_t, size_t, size_t, NumaReplicatedAccessToken);
+    Worker(SharedState&, ISearchManager&, size_t, size_t, size_t, size_t, NumaReplicatedAccessToken, Thread*);
+
+    size_t workerIdx;
 
     // Called at instantiation to initialize reductions tables.
     // Reset histories, usually before a new game.
@@ -277,9 +304,10 @@ class Worker {
     // It searches from the root position and outputs the "bestmove".
     void start_searching();
 
-    bool is_mainthread() const { return threadIdx == 0; }
+    bool is_mainthread() const { return threadIdx == 0 && workerIdx == 0; }
 
     void ensure_network_replicated();
+    void yield_to_next();
 
     // Public because they need to be updatable by the stats
     ButterflyHistory mainHistory;
@@ -291,6 +319,10 @@ class Worker {
 
     TTMoveHistory    ttMoveHistory;
     SharedHistories& sharedHistory;
+
+    CustomStack contextStack;
+    ucontext_t activeContext;
+    bool is_active, disable_yielding;
 
    private:
     void iterative_deepening();
@@ -356,6 +388,7 @@ class Worker {
     // Used by NNUE
     Eval::NNUE::AccumulatorStack  accumulatorStack;
     Eval::NNUE::AccumulatorCaches refreshTable;
+    Thread* myThread;
 
     friend class Stockfish::ThreadPool;
     friend class SearchManager;

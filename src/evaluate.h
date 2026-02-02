@@ -26,6 +26,7 @@
 namespace Stockfish {
 
 class Position;
+namespace Search { class Worker; }
 
 namespace Eval {
 
@@ -50,7 +51,8 @@ Value evaluate(const NNUE::Networks&          networks,
                const Position&                pos,
                Eval::NNUE::AccumulatorStack&  accumulators,
                Eval::NNUE::AccumulatorCaches& caches,
-               int                            optimism);
+               int                            optimism,
+               Search::Worker* worker = nullptr);
 }  // namespace Eval
 
 }  // namespace Stockfish

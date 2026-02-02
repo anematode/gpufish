@@ -52,11 +52,12 @@ Value Eval::evaluate(const Eval::NNUE::Networks&    networks,
                      const Position&                pos,
                      Eval::NNUE::AccumulatorStack&  accumulators,
                      Eval::NNUE::AccumulatorCaches& caches,
-                     int                            optimism) {
+                     int                            optimism,
+                     Search::Worker* worker) {
 
     assert(!pos.checkers());
 
-    auto [psqt, positional] = networks.big.evaluate(pos, accumulators, caches.big);
+    auto [psqt, positional] = networks.big.evaluate(pos, accumulators, caches.big, worker);
 
     Value nnue = (125 * psqt + 131 * positional) / 128;
 

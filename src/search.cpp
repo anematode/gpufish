@@ -153,19 +153,19 @@ bool is_shuffling(Move move, Stack* const ss, const Position& pos) {
 
 }  // namespace
 
-Search::Worker::Worker(SharedState&                    sharedState,
-                       std::unique_ptr<ISearchManager> sm,
-                       size_t                          threadId,
-                       size_t                          numaThreadId,
-                       size_t                          numaTotalThreads,
-                       NumaReplicatedAccessToken       token) :
+Search::Worker::Worker(SharedState&              sharedState,
+                       ISearchManager&           sm,
+                       size_t                    threadId,
+                       size_t                    numaThreadId,
+                       size_t                    numaTotalThreads,
+                       NumaReplicatedAccessToken token) :
     // Unpack the SharedState struct into member variables
     sharedHistory(sharedState.sharedHistories.at(token.get_numa_index())),
     threadIdx(threadId),
     numaThreadIdx(numaThreadId),
     numaTotal(numaTotalThreads),
     numaAccessToken(token),
-    manager(std::move(sm)),
+    manager(sm),
     options(sharedState.options),
     threads(sharedState.threads),
     tt(sharedState.tt),
@@ -234,7 +234,7 @@ void Search::Worker::start_searching() {
 
     if (int(options["MultiPV"]) == 1 && !limits.depth && !limits.mate && !skill.enabled()
         && rootMoves[0].pv[0] != Move::none())
-        bestThread = threads.get_best_thread()->worker.get();
+        bestThread = threads.get_best_worker();
 
     main_manager()->bestPreviousScore        = bestThread->rootMoves[0].score;
     main_manager()->bestPreviousAverageScore = bestThread->rootMoves[0].averageScore;
@@ -477,8 +477,11 @@ void Search::Worker::iterative_deepening() {
         // Use part of the gained time from a previous stable move for the current move
         for (auto&& th : threads)
         {
-            totBestMoveChanges += th->worker->bestMoveChanges;
-            th->worker->bestMoveChanges = 0;
+            for (auto& worker : th->workers)
+            {
+                totBestMoveChanges += worker->bestMoveChanges;
+                worker->bestMoveChanges = 0;
+            }
         }
 
         // Do we have time for the next iteration? Can we stop searching now?

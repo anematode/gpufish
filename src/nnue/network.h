@@ -119,13 +119,13 @@ class Network {
 using BigFeatureTransformer  = FeatureTransformer<TransformedFeatureDimensionsBig>;
 using BigNetworkArchitecture = NetworkArchitecture<TransformedFeatureDimensionsBig, L2Big, L3Big>;
 
-using NetworkBig   = Network<BigNetworkArchitecture, BigFeatureTransformer>;
+using NetworkBig = Network<BigNetworkArchitecture, BigFeatureTransformer>;
 
 struct Networks {
     Networks(EvalFile bigFile, [[maybe_unused]] EvalFile smallFile) :
         big(bigFile, EmbeddedNNUEType::BIG) {}
 
-    NetworkBig   big;
+    NetworkBig big;
 };
 
 

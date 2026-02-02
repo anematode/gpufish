@@ -100,14 +100,14 @@ struct AccumulatorCaches {
         big.clear(networks.big);
     }
 
-    Cache<TransformedFeatureDimensionsBig>   big;
+    Cache<TransformedFeatureDimensionsBig> big;
 };
 
 
 template<typename FeatureSet>
 struct AccumulatorState {
-    Accumulator<TransformedFeatureDimensionsBig>   accumulatorBig;
-    typename FeatureSet::DiffType                  diff;
+    Accumulator<TransformedFeatureDimensionsBig> accumulatorBig;
+    typename FeatureSet::DiffType                diff;
 
     template<IndexType Size>
     auto& acc() noexcept {

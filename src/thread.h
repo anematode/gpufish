@@ -96,8 +96,9 @@ class Thread {
     void   wait_for_search_finished();
     size_t id() const { return idx; }
 
-    LargePagePtr<Search::Worker> worker;
-    std::function<void()>        jobFunc;
+    std::vector<LargePagePtr<Search::Worker>> workers;
+    std::unique_ptr<Search::ISearchManager>   searchManager;
+    std::function<void()>                     jobFunc;
 
    private:
     std::mutex                mutex;
@@ -145,7 +146,7 @@ class ThreadPool {
     Thread*                main_thread() const { return threads.front().get(); }
     uint64_t               nodes_searched() const;
     uint64_t               tb_hits() const;
-    Thread*                get_best_thread() const;
+    Search::Worker*        get_best_worker() const;
     void                   start_searching();
     void                   wait_for_search_finished() const;
 
@@ -171,7 +172,12 @@ class ThreadPool {
 
         uint64_t sum = 0;
         for (auto&& th : threads)
-            sum += (th->worker.get()->*member).load(std::memory_order_relaxed);
+        {
+            for (const auto& worker : th->workers)
+            {
+                sum += (worker.get()->*member).load(std::memory_order_relaxed);
+            }
+        }
         return sum;
     }
 };

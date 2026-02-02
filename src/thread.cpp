@@ -40,6 +40,8 @@
 
 namespace Stockfish {
 
+const int WorkersPerThread = 8;
+
 // Constructor launches the thread and waits until it goes to sleep
 // in idle_loop(). Note that 'searching' and 'exit' should be already set.
 Thread::Thread(Search::SharedState&                    sharedState,
@@ -54,15 +56,21 @@ Thread::Thread(Search::SharedState&                    sharedState,
     nthreads(sharedState.options["Threads"]),
     stdThread(&Thread::idle_loop, this) {
 
+    searchManager = std::move(sm);
+
     wait_for_search_finished();
 
-    run_custom_job([this, &binder, &sharedState, &sm, n]() {
+    run_custom_job([this, &binder, &sharedState, n]() {
         // Use the binder to [maybe] bind the threads to a NUMA node before doing
         // the Worker allocation. Ideally we would also allocate the SearchManager
         // here, but that's minor.
         this->numaAccessToken = binder();
-        this->worker          = make_unique_large_page<Search::Worker>(
-          sharedState, std::move(sm), n, idxInNuma, totalNuma, this->numaAccessToken);
+
+        for (int i = 0; i < WorkersPerThread; ++i)
+        {
+            this->workers.push_back(make_unique_large_page<Search::Worker>(
+              sharedState, *searchManager, n, idxInNuma, totalNuma, this->numaAccessToken));
+        }
     });
 
     wait_for_search_finished();
@@ -83,13 +91,16 @@ Thread::~Thread() {
 // Wakes up the thread that will start the search
 void Thread::start_searching() {
     assert(worker != nullptr);
-    run_custom_job([this]() { worker->start_searching(); });
+    run_custom_job([this]() { workers[0]->start_searching(); });
 }
 
 // Clears the histories for the thread worker (usually before a new game)
 void Thread::clear_worker() {
     assert(worker != nullptr);
-    run_custom_job([this]() { worker->clear(); });
+    run_custom_job([this]() {
+        for (auto& worker : workers)
+            worker->clear();
+    });
 }
 
 // Blocks on the condition variable until the thread has finished searching
@@ -110,7 +121,10 @@ void Thread::run_custom_job(std::function<void()> f) {
     cv.notify_one();
 }
 
-void Thread::ensure_network_replicated() { worker->ensure_network_replicated(); }
+void Thread::ensure_network_replicated() {
+    for (auto& worker : workers)
+        worker->ensure_network_replicated();
+}
 
 // Thread gets parked here, blocked on the condition variable
 // when the thread has no work to do.
@@ -136,7 +150,9 @@ void Thread::idle_loop() {
     }
 }
 
-Search::SearchManager* ThreadPool::main_manager() { return main_thread()->worker->main_manager(); }
+Search::SearchManager* ThreadPool::main_manager() {
+    return static_cast<Search::SearchManager*>(main_thread()->searchManager.get());
+}
 
 uint64_t ThreadPool::nodes_searched() const { return accumulate(&Search::Worker::nodes); }
 uint64_t ThreadPool::tb_hits() const { return accumulate(&Search::Worker::tbHits); }
@@ -327,14 +343,17 @@ void ThreadPool::start_thinking(const OptionsMap&  options,
     for (auto&& th : threads)
     {
         th->run_custom_job([&]() {
-            th->worker->limits = limits;
-            th->worker->nodes = th->worker->tbHits = th->worker->bestMoveChanges = 0;
-            th->worker->nmpMinPly                                                = 0;
-            th->worker->rootDepth = th->worker->completedDepth = 0;
-            th->worker->rootMoves                              = rootMoves;
-            th->worker->rootPos.set(pos.fen(), pos.is_chess960(), &th->worker->rootState);
-            th->worker->rootState = setupStates->back();
-            th->worker->tbConfig  = tbConfig;
+            for (auto& worker : th->workers)
+            {
+                worker->limits = limits;
+                worker->nodes = worker->tbHits = worker->bestMoveChanges = 0;
+                worker->nmpMinPly                                        = 0;
+                worker->rootDepth = worker->completedDepth = 0;
+                worker->rootMoves                          = rootMoves;
+                worker->rootPos.set(pos.fen(), pos.is_chess960(), &worker->rootState);
+                worker->rootState = setupStates->back();
+                worker->tbConfig  = tbConfig;
+            }
         });
     }
 
@@ -344,70 +363,82 @@ void ThreadPool::start_thinking(const OptionsMap&  options,
     main_thread()->start_searching();
 }
 
-Thread* ThreadPool::get_best_thread() const {
+Search::Worker* ThreadPool::get_best_worker() const {
 
-    Thread* bestThread = threads.front().get();
-    Value   minScore   = VALUE_NONE;
+    Search::Worker* bestWorker = threads.front().get()->workers[0].get();
+    Value           minScore   = VALUE_NONE;
 
-    std::unordered_map<Move, int64_t, Move::MoveHash> votes(
-      2 * std::min(size(), bestThread->worker->rootMoves.size()));
+    std::unordered_map<Move, int64_t, Move::MoveHash> votes(2 * size());
 
     // Find the minimum score of all threads
     for (auto&& th : threads)
-        minScore = std::min(minScore, th->worker->rootMoves[0].score);
+    {
+        for (auto& worker : th->workers)
+        {
+            minScore = std::min(minScore, worker->rootMoves[0].score);
+        }
+    }
 
     // Vote according to score and depth, and select the best thread
-    auto thread_voting_value = [minScore](Thread* th) {
-        return (th->worker->rootMoves[0].score - minScore + 14) * int(th->worker->completedDepth);
+    auto thread_voting_value = [minScore](Search::Worker* worker) {
+        return (worker->rootMoves[0].score - minScore + 14) * int(worker->completedDepth);
     };
 
     for (auto&& th : threads)
-        votes[th->worker->rootMoves[0].pv[0]] += thread_voting_value(th.get());
+    {
+        for (auto& worker : th->workers)
+        {
+            votes[worker->rootMoves[0].pv[0]] += thread_voting_value(worker.get());
+        }
+    }
 
     for (auto&& th : threads)
     {
-        const auto bestThreadScore = bestThread->worker->rootMoves[0].score;
-        const auto newThreadScore  = th->worker->rootMoves[0].score;
-
-        const auto& bestThreadPV = bestThread->worker->rootMoves[0].pv;
-        const auto& newThreadPV  = th->worker->rootMoves[0].pv;
-
-        const auto bestThreadMoveVote = votes[bestThreadPV[0]];
-        const auto newThreadMoveVote  = votes[newThreadPV[0]];
-
-        const bool bestThreadInProvenWin = is_win(bestThreadScore);
-        const bool newThreadInProvenWin  = is_win(newThreadScore);
-
-        const bool bestThreadInProvenLoss =
-          bestThreadScore != -VALUE_INFINITE && is_loss(bestThreadScore);
-        const bool newThreadInProvenLoss =
-          newThreadScore != -VALUE_INFINITE && is_loss(newThreadScore);
-
-        // We make sure not to pick a thread with truncated principal variation
-        const bool betterVotingValue =
-          thread_voting_value(th.get()) * int(newThreadPV.size() > 2)
-          > thread_voting_value(bestThread) * int(bestThreadPV.size() > 2);
-
-        if (bestThreadInProvenWin)
+        for (auto& worker : th->workers)
         {
-            // Make sure we pick the shortest mate / TB conversion
-            if (newThreadScore > bestThreadScore)
-                bestThread = th.get();
+            const auto bestThreadScore = bestWorker->rootMoves[0].score;
+            const auto newThreadScore  = worker->rootMoves[0].score;
+
+            const auto& bestThreadPV = bestWorker->rootMoves[0].pv;
+            const auto& newThreadPV  = worker->rootMoves[0].pv;
+
+            const auto bestThreadMoveVote = votes[bestThreadPV[0]];
+            const auto newThreadMoveVote  = votes[newThreadPV[0]];
+
+            const bool bestThreadInProvenWin = is_win(bestThreadScore);
+            const bool newThreadInProvenWin  = is_win(newThreadScore);
+
+            const bool bestThreadInProvenLoss =
+              bestThreadScore != -VALUE_INFINITE && is_loss(bestThreadScore);
+            const bool newThreadInProvenLoss =
+              newThreadScore != -VALUE_INFINITE && is_loss(newThreadScore);
+
+            // We make sure not to pick a thread with truncated principal variation
+            const bool betterVotingValue =
+              thread_voting_value(worker.get()) * int(newThreadPV.size() > 2)
+              > thread_voting_value(bestWorker) * int(bestThreadPV.size() > 2);
+
+            if (bestThreadInProvenWin)
+            {
+                // Make sure we pick the shortest mate / TB conversion
+                if (newThreadScore > bestThreadScore)
+                    bestWorker = worker.get();
+            }
+            else if (bestThreadInProvenLoss)
+            {
+                // Make sure we pick the shortest mated / TB conversion
+                if (newThreadInProvenLoss && newThreadScore < bestThreadScore)
+                    bestWorker = worker.get();
+            }
+            else if (newThreadInProvenWin || newThreadInProvenLoss
+                     || (!is_loss(newThreadScore)
+                         && (newThreadMoveVote > bestThreadMoveVote
+                             || (newThreadMoveVote == bestThreadMoveVote && betterVotingValue))))
+                bestWorker = worker.get();
         }
-        else if (bestThreadInProvenLoss)
-        {
-            // Make sure we pick the shortest mated / TB conversion
-            if (newThreadInProvenLoss && newThreadScore < bestThreadScore)
-                bestThread = th.get();
-        }
-        else if (newThreadInProvenWin || newThreadInProvenLoss
-                 || (!is_loss(newThreadScore)
-                     && (newThreadMoveVote > bestThreadMoveVote
-                         || (newThreadMoveVote == bestThreadMoveVote && betterVotingValue))))
-            bestThread = th.get();
     }
 
-    return bestThread;
+    return bestWorker;
 }
 
 

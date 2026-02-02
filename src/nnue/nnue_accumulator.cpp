@@ -258,8 +258,7 @@ void AccumulatorStack::forward_update_incremental(
 
 template<typename FeatureSet, IndexType Dimensions>
 void AccumulatorStack::backward_update_incremental(
-  Color perspective,
-
+  Color                                 perspective,
   const Position&                       pos,
   const FeatureTransformer<Dimensions>& featureTransformer,
   const std::size_t                     end) noexcept {

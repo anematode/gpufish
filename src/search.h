@@ -267,12 +267,7 @@ class NullSearchManager: public ISearchManager {
 // of the search history, and storing data required for the search.
 class Worker {
    public:
-    Worker(SharedState&,
-           std::unique_ptr<ISearchManager>,
-           size_t,
-           size_t,
-           size_t,
-           NumaReplicatedAccessToken);
+    Worker(SharedState&, ISearchManager&, size_t, size_t, size_t, NumaReplicatedAccessToken);
 
     // Called at instantiation to initialize reductions tables.
     // Reset histories, usually before a new game.
@@ -320,7 +315,7 @@ class Worker {
     // Pointer to the search manager, only allowed to be called by the main thread
     SearchManager* main_manager() const {
         assert(threadIdx == 0);
-        return static_cast<SearchManager*>(manager.get());
+        return static_cast<SearchManager*>(&manager);
     }
 
     TimePoint elapsed() const;
@@ -349,7 +344,7 @@ class Worker {
     std::array<int, MAX_MOVES> reductions;  // [depth or moveNumber]
 
     // The main thread has a SearchManager, the others have a NullSearchManager
-    std::unique_ptr<ISearchManager> manager;
+    ISearchManager& manager;
 
     Tablebases::Config tbConfig;
 

@@ -42,7 +42,7 @@
 
 namespace Stockfish {
 
-const int WorkersPerThread = 8;
+const int WorkersPerThread = 1;
 
 // Constructor launches the thread and waits until it goes to sleep
 // in idle_loop(). Note that 'searching' and 'exit' should be already set.
@@ -90,12 +90,21 @@ Thread::~Thread() {
     stdThread.join();
 }
 
-static void start_searching_fwd(Search::Worker* worker) {
+thread_local Thread* curr_thread;
+
+static void start_searching_fwd(int idx) {
+    Search::Worker* worker = curr_thread->workers[idx].get();
     sf_assume(worker != nullptr);
+
+    std::cout << "Worker index: " << worker->workerIdx << ' ' << worker << '\n';
 
     worker->start_searching();
     worker->is_active = false;
+
+    std::cout << "Worker finished searching: " << worker->threadIdx << '\n';
 }
+
+std::mutex mtx;
 
 // Wakes up the thread that will start the search
 void Thread::start_searching() {
@@ -103,7 +112,8 @@ void Thread::start_searching() {
     ucontext_t main;
 
     run_custom_job([this, &main]() {
-        for (volatile size_t i = 0; i < workers.size(); ++i)
+        curr_thread = this;
+        for (size_t i = 0; i < workers.size(); ++i)
         {
             auto& context = workers.at(i)->activeContext;
             if (getcontext(&context) == -1)
@@ -119,8 +129,7 @@ void Thread::start_searching() {
             worker->is_active = true;
             worker->disable_yielding = false;
 
-            makecontext(&worker->activeContext,
-                reinterpret_cast<void(*)()>(&start_searching_fwd), 1, worker.get());
+            makecontext(&worker->activeContext, reinterpret_cast<void(*)()>(&start_searching_fwd), 1, (int)i);
         }
 
         if (swapcontext(&main, &workers[0].get()->activeContext) == -1)
@@ -135,7 +144,7 @@ void Thread::start_searching() {
             worker->disable_yielding = true;
             if (!worker->is_active) continue;
 
-            if (swapcontext(&main, &worker.get()->activeContext) == -1)
+            if (swapcontext(&main, &worker->activeContext) == -1)
             {
                 perror("swapcontext 2");
                 abort();

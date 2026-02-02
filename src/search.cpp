@@ -247,9 +247,15 @@ void Search::Worker::start_searching() {
 
     while (std::any_of(myThread->workers.begin() + 1, myThread->workers.end(), [&] (LargePagePtr<Search::Worker>& worker) {
         worker->disable_yielding = true;
+        if (worker->is_active)
+        {
+            std::cout << "Worker " << worker->workerIdx << " is active!\n";
+        }
         return worker->is_active;
     }))
     {
+        disable_yielding = false;
+        std::cout << "back here!\n";
         yield_to_next();
     }
 
@@ -288,9 +294,6 @@ void Search::Worker::start_searching() {
 
     auto bestmove = UCIEngine::move(bestThread->rootMoves[0].pv[0], rootPos.is_chess960());
     main_manager()->updates.onBestmove(bestmove, ponder);
-
-    std::cout << "GOOSSE!\n";
-
 }
 
 // Main iterative deepening loop. It calls search()
@@ -573,8 +576,6 @@ void Search::Worker::iterative_deepening() {
         mainThread->iterValue[iterIdx] = bestValue;
         iterIdx                        = (iterIdx + 1) & 3;
     }
-
-    std::cout << "Finished: " << threadIdx << ':' << workerIdx << '\n';
 
     if (!mainThread)
         return;

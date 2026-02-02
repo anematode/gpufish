@@ -324,7 +324,7 @@ class Worker {
     ucontext_t activeContext;
     bool is_active, disable_yielding;
 
-   private:
+   public:
     void iterative_deepening();
 
     void do_move(Position& pos, const Move move, StateInfo& st, Stack* const ss);

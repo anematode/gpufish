@@ -210,7 +210,7 @@ void Search::Worker::start_searching() {
         return;
     }
 
-    std::cout << "Main thread started searching!\n";
+    // std::cout << "Main thread started searching!\n"; // todo: cleanup print debug messages in this function
 
     main_manager()->tm.init(limits, rootPos.side_to_move(), rootPos.game_ply(), options,
                             main_manager()->originalTimeAdjust);
@@ -226,7 +226,7 @@ void Search::Worker::start_searching() {
     {
         threads.start_searching();  // start non-main threads
         iterative_deepening();      // main thread start searching
-        std::cout << "Main thread done with ID!\n";
+        // std::cout << "Main thread done with ID!\n";
     }
 
     // When we reach the maximum depth, we can arrive here without a raise of
@@ -241,7 +241,7 @@ void Search::Worker::start_searching() {
     // "ponderhit" just reset threads.ponder)
     threads.stop = true;
 
-    std::cout << "Main thread waiting for search finished!\n";
+    // std::cout << "Main thread waiting for search finished!\n";
 
     // yield for all workers to finish
     for (;;)
@@ -251,27 +251,27 @@ void Search::Worker::start_searching() {
             size_t index = (workerIdx + 1) % myThread->workers.size();
             auto & the_worker = myThread->workers[index];
             the_worker->disable_yielding = true;
-            if (the_worker->is_active)
-            {
-                std::cout << "Worker " << the_worker->workerIdx << " is active!\n";
-            }
+//            if (the_worker->is_active)
+//            {
+//                std::cout << "Worker " << the_worker->workerIdx << " is active!\n";
+//            }
             if (the_worker->is_active) {
                 has_more = true;
                 break;
             }
         }
-        std::cout << "has more: " << has_more << "...\n";
+        // std::cout << "has more: " << has_more << "...\n";
         if (!has_more) break;
 
         disable_yielding = false;
-        std::cout << "back here! i am active: " << is_active << " - yielding.\n";
+        // std::cout << "back here! i am active: " << is_active << " - yielding.\n";
         yield_to_next();
     }
-    std::cout << "Finished scheduling all workers, now waiting for the threads;\n";
+    // std::cout << "Finished scheduling all workers, now waiting for the threads;\n";
 
     // Wait until all threads have finished
     threads.wait_for_search_finished();
-    std::cout << "Main thread waited for search finished!\n";
+    // std::cout << "Main thread waited for search finished!\n";
 
     // When playing in 'nodes as time' mode, subtract the searched nodes from
     // the available ones before exiting.
@@ -287,7 +287,7 @@ void Search::Worker::start_searching() {
         && rootMoves[0].pv[0] != Move::none())
         bestThread = threads.get_best_worker();
 
-    std::cout << "POOOOOP!\n";
+    // std::cout << "Finalizing analysis in main thread!\n";
 
     main_manager()->bestPreviousScore        = bestThread->rootMoves[0].score;
     main_manager()->bestPreviousAverageScore = bestThread->rootMoves[0].averageScore;

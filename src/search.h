@@ -309,7 +309,7 @@ class Worker {
     void ensure_network_replicated();
 
     // Worker async scheduling primitives
-    void yield_to_next();
+    bool yield_to_next(); // returns whether it yielded
     void join_all_other_workers();
 
     // Public because they need to be updatable by the stats

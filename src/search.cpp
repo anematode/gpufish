@@ -185,8 +185,8 @@ void Search::Worker::ensure_network_replicated() {
     (void) (networks[numaAccessToken]);
 }
 
-void Worker::yield_to_next() {
-    if (disable_yielding) return;
+bool Worker::yield_to_next() {
+    if (disable_yielding) return false;
 
     auto* thread = myThread;
     // cycle through other threads to find a yield target
@@ -195,32 +195,18 @@ void Worker::yield_to_next() {
         if (thread->workers[index]->is_active)
         {
             swapcontext(&activeContext, &thread->workers[index]->activeContext);
-            return;
+            return true;
         }
     }
+    return false;
 }
 
 void Worker::join_all_other_workers() {
-    for (;;)
-    {
-        bool has_more = false;
-        for (size_t i = 1; i < myThread->workers.size(); i++)
-        {
-            // search for if we have any incomplete workers that are not us (hence starting with i=1)
-            // todo: this checking is technically redundant, if we just made yield_to_next()
-            // todo: report return whether it did a yield or not. we could call it in loop directly
-            size_t index = (workerIdx + i) % myThread->workers.size();
-            auto & the_worker = myThread->workers[index];
-            if (the_worker->is_active) {
-                has_more = true;
-                break;
-            }
-        }
-        if (!has_more) break;
-
-        disable_yielding = false;
-        yield_to_next();
-    }
+    disable_yielding = false;
+    bool has_more;
+    do {
+        has_more = yield_to_next();
+    } while (has_more);
 }
 
 void Search::Worker::start_searching() {

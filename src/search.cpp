@@ -161,7 +161,7 @@ Search::Worker::Worker(SharedState&              sharedState,
                        size_t                    numaThreadId,
                        size_t                    numaTotalThreads,
                        NumaReplicatedAccessToken token,
-                       Thread* ownerThread) :
+                       Thread*                   ownerThread) :
     // Unpack the SharedState struct into member variables
     workerIdx(workerId),
     sharedHistory(sharedState.sharedHistories.at(token.get_numa_index())),
@@ -186,11 +186,13 @@ void Search::Worker::ensure_network_replicated() {
 }
 
 bool Worker::yield_to_next() {
-    if (disable_yielding) return false;
+    if (disable_yielding)
+        return false;
 
     auto* thread = myThread;
     // cycle through other threads to find a yield target
-    for (size_t i = 1; i < thread->workers.size(); i++) {
+    for (size_t i = 1; i < thread->workers.size(); i++)
+    {
         size_t index = (workerIdx + i) % thread->workers.size();
         if (thread->workers[index]->is_active)
         {
@@ -204,7 +206,8 @@ bool Worker::yield_to_next() {
 void Worker::join_all_other_workers() {
     disable_yielding = false;
     bool has_more;
-    do {
+    do
+    {
         has_more = yield_to_next();
     } while (has_more);
 }

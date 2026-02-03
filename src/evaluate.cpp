@@ -53,7 +53,7 @@ Value Eval::evaluate(const Eval::NNUE::Networks&    networks,
                      Eval::NNUE::AccumulatorStack&  accumulators,
                      Eval::NNUE::AccumulatorCaches& caches,
                      int                            optimism,
-                     Search::Worker* worker) {
+                     Search::Worker*                worker) {
 
     assert(!pos.checkers());
 

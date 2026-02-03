@@ -70,8 +70,9 @@ Thread::Thread(Search::SharedState&                    sharedState,
 
         for (int i = 0; i < WorkersPerThread; ++i)
         {
-            this->workers.push_back(make_unique_large_page<Search::Worker>(
-              sharedState, *searchManager, n, i, idxInNuma, totalNuma, this->numaAccessToken, this));
+            this->workers.push_back(
+              make_unique_large_page<Search::Worker>(sharedState, *searchManager, n, i, idxInNuma,
+                                                     totalNuma, this->numaAccessToken, this));
         }
     });
 
@@ -127,15 +128,16 @@ void Thread::start_searching() {
                 perror("getcontext");
                 abort();
             }
-            auto& worker = workers.at(i);
-            context.uc_link = &main;
+            auto& worker             = workers.at(i);
+            context.uc_link          = &main;
             context.uc_stack.ss_size = worker->contextStack.size;
-            context.uc_stack.ss_sp = worker->contextStack.mem;
+            context.uc_stack.ss_sp   = worker->contextStack.mem;
 
-            worker->is_active = true;
+            worker->is_active        = true;
             worker->disable_yielding = false;
 
-            makecontext(&worker->activeContext, reinterpret_cast<void(*)()>(&start_searching_fwd), 1, (int)i);
+            makecontext(&worker->activeContext, reinterpret_cast<void (*)()>(&start_searching_fwd),
+                        1, (int) i);
         }
 
         // invoke a worker
@@ -146,10 +148,11 @@ void Thread::start_searching() {
         }
 
         // Iterate over all workers and step all active ones to completion
-        for (auto & worker : workers)
+        for (auto& worker : workers)
         {
             worker->disable_yielding = true;
-            if (!worker->is_active) continue;
+            if (!worker->is_active)
+                continue;
 
             if (swapcontext(&main, &worker->activeContext) == -1)
             {

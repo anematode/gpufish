@@ -266,10 +266,11 @@ class NullSearchManager: public ISearchManager {
 struct CustomStack {
     static constexpr size_t StackSize = 1 << 23;
 
-    void* mem;
+    void*        mem;
     const size_t size;
 
-    CustomStack(size_t s = StackSize) : size(s) {
+    CustomStack(size_t s = StackSize) :
+        size(s) {
         mem = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         if (mem == MAP_FAILED)
         {
@@ -280,7 +281,8 @@ struct CustomStack {
     }
 
     ~CustomStack() {
-        if (!mem) return;
+        if (!mem)
+            return;
 
         munmap(mem, size);
         mem = nullptr;
@@ -292,7 +294,14 @@ struct CustomStack {
 // of the search history, and storing data required for the search.
 class Worker {
    public:
-    Worker(SharedState&, ISearchManager&, size_t, size_t, size_t, size_t, NumaReplicatedAccessToken, Thread*);
+    Worker(SharedState&,
+           ISearchManager&,
+           size_t,
+           size_t,
+           size_t,
+           size_t,
+           NumaReplicatedAccessToken,
+           Thread*);
 
     size_t workerIdx;
 
@@ -309,7 +318,7 @@ class Worker {
     void ensure_network_replicated();
 
     // Worker async scheduling primitives
-    bool yield_to_next(); // returns whether it yielded
+    bool yield_to_next();  // returns whether it yielded
     void join_all_other_workers();
 
     // Public because they need to be updatable by the stats
@@ -324,8 +333,8 @@ class Worker {
     SharedHistories& sharedHistory;
 
     CustomStack contextStack;
-    ucontext_t activeContext;
-    bool is_active, disable_yielding;
+    ucontext_t  activeContext;
+    bool        is_active, disable_yielding;
 
    public:
     void iterative_deepening();
@@ -391,7 +400,7 @@ class Worker {
     // Used by NNUE
     Eval::NNUE::AccumulatorStack  accumulatorStack;
     Eval::NNUE::AccumulatorCaches refreshTable;
-    Thread* myThread;
+    Thread*                       myThread;
 
     friend class Stockfish::ThreadPool;
     friend class SearchManager;

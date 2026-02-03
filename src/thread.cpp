@@ -140,25 +140,25 @@ void Thread::start_searching() {
                         1, (int) i);
         }
 
-        // invoke a worker
-        if (swapcontext(&main, &workers[0].get()->activeContext) == -1)
-        {
-            perror("swapcontext 1");
-            abort();
-        }
-
         // Iterate over all workers and step all active ones to completion
-        for (auto& worker : workers)
+        for (;;)
         {
-            worker->disable_yielding = true;
-            if (!worker->is_active)
-                continue;
-
-            if (swapcontext(&main, &worker->activeContext) == -1)
+            bool has_more = false;
+            for (auto& worker : workers)
             {
-                perror("swapcontext 2");
-                abort();
+                worker->disable_yielding = true;
+                if (!worker->is_active)
+                    continue;
+
+                has_more = true;
+                if (swapcontext(&main, &worker->activeContext) == -1)
+                {
+                    perror("swapcontext 2");
+                    abort();
+                }
             }
+            if (!has_more)
+                break;
         }
     });
 }

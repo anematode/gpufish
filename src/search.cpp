@@ -191,7 +191,7 @@ void Worker::yield_to_next() {
     auto* thread = myThread;
     // cycle through other threads to find a yield target
     for (size_t i = 1; i < thread->workers.size(); i++) {
-        size_t index = (workerIdx + 1) % thread->workers.size();
+        size_t index = (workerIdx + i) % thread->workers.size();
         if (thread->workers[index]->is_active)
         {
             swapcontext(&activeContext, &thread->workers[index]->activeContext);
@@ -243,14 +243,17 @@ void Search::Worker::start_searching() {
 
     // std::cout << "Main thread waiting for search finished!\n";
 
-    // yield for all workers to finish
+    // continue scheduling until all workers finish
     for (;;)
     {
         bool has_more = false;
-        for (size_t i = 0; i < myThread->workers.size(); i++) {
-            size_t index = (workerIdx + 1) % myThread->workers.size();
+        for (size_t i = 1; i < myThread->workers.size(); i++) {
+            // search for if we have any incomplete workers that are not us (hence starting with i=1)
+            // todo: this checking is technically redundant, if we just made yield_to_next()
+            // todo: report return whether it did a yield or not. we could call it in loop directly
+            size_t index = (workerIdx + i) % myThread->workers.size();
             auto & the_worker = myThread->workers[index];
-            the_worker->disable_yielding = true;
+            // the_worker->disable_yielding = true;
 //            if (the_worker->is_active)
 //            {
 //                std::cout << "Worker " << the_worker->workerIdx << " is active!\n";
@@ -260,7 +263,6 @@ void Search::Worker::start_searching() {
                 break;
             }
         }
-        // std::cout << "has more: " << has_more << "...\n";
         if (!has_more) break;
 
         disable_yielding = false;

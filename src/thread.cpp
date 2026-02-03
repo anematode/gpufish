@@ -96,18 +96,17 @@ static void start_searching_fwd(int idx) {
     Search::Worker* worker = curr_thread->workers[idx].get();
     sf_assume(worker != nullptr);
 
-    // std::cout << "Worker index: " << worker->workerIdx << ' ' << worker << '\n';
-
     worker->start_searching();
     worker->is_active = false;
 
-    // std::cout << "Worker finished searching: " << worker->workerIdx << '\n';
+    // safety mitigation: save this context just in case the worker is invoked after it is done.
+    // this should never happen, but may be useful for debugging the async scheduler.
+    // can be removed for optimisation
     if (getcontext(&worker->activeContext) == -1)
     {
         perror("getcontext 2");
         abort();
     }
-    // std::cout << "Worker exiting: " << worker->workerIdx << '\n';
 }
 
 std::mutex mtx;
@@ -147,6 +146,8 @@ void Thread::start_searching() {
         }
 
         // Iterate over all workers and step all active ones to completion
+        // todo: this should also call a method on Thread rather than rewriting this logic here.
+        // todo: similar with sequence in Search::Worker::start_searching()
         for (auto & worker : workers)
         {
             worker->disable_yielding = true;

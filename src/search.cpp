@@ -200,6 +200,29 @@ void Worker::yield_to_next() {
     }
 }
 
+void Worker::join_all_other_workers() {
+    for (;;)
+    {
+        bool has_more = false;
+        for (size_t i = 1; i < myThread->workers.size(); i++)
+        {
+            // search for if we have any incomplete workers that are not us (hence starting with i=1)
+            // todo: this checking is technically redundant, if we just made yield_to_next()
+            // todo: report return whether it did a yield or not. we could call it in loop directly
+            size_t index = (workerIdx + i) % myThread->workers.size();
+            auto & the_worker = myThread->workers[index];
+            if (the_worker->is_active) {
+                has_more = true;
+                break;
+            }
+        }
+        if (!has_more) break;
+
+        disable_yielding = false;
+        yield_to_next();
+    }
+}
+
 void Search::Worker::start_searching() {
     accumulatorStack.reset();
 
@@ -243,32 +266,8 @@ void Search::Worker::start_searching() {
 
     // std::cout << "Main thread waiting for search finished!\n";
 
-    // continue scheduling until all workers finish
-    for (;;)
-    {
-        bool has_more = false;
-        for (size_t i = 1; i < myThread->workers.size(); i++) {
-            // search for if we have any incomplete workers that are not us (hence starting with i=1)
-            // todo: this checking is technically redundant, if we just made yield_to_next()
-            // todo: report return whether it did a yield or not. we could call it in loop directly
-            size_t index = (workerIdx + i) % myThread->workers.size();
-            auto & the_worker = myThread->workers[index];
-            // the_worker->disable_yielding = true;
-//            if (the_worker->is_active)
-//            {
-//                std::cout << "Worker " << the_worker->workerIdx << " is active!\n";
-//            }
-            if (the_worker->is_active) {
-                has_more = true;
-                break;
-            }
-        }
-        if (!has_more) break;
-
-        disable_yielding = false;
-        // std::cout << "back here! i am active: " << is_active << " - yielding.\n";
-        yield_to_next();
-    }
+    // wait for other workers on this thread finish
+    join_all_other_workers();
     // std::cout << "Finished scheduling all workers, now waiting for the threads;\n";
 
     // Wait until all threads have finished

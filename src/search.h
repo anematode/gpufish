@@ -307,7 +307,10 @@ class Worker {
     bool is_mainthread() const { return threadIdx == 0 && workerIdx == 0; }
 
     void ensure_network_replicated();
+
+    // Worker async scheduling primitives
     void yield_to_next();
+    void join_all_other_workers();
 
     // Public because they need to be updatable by the stats
     ButterflyHistory mainHistory;

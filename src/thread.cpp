@@ -146,8 +146,6 @@ void Thread::start_searching() {
         }
 
         // Iterate over all workers and step all active ones to completion
-        // todo: this should also call a method on Thread rather than rewriting this logic here.
-        // todo: similar with sequence in Search::Worker::start_searching()
         for (auto & worker : workers)
         {
             worker->disable_yielding = true;

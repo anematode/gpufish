@@ -161,11 +161,11 @@ Search::Worker::Worker(SharedState&              sharedState,
                        size_t                    numaThreadId,
                        size_t                    numaTotalThreads,
                        NumaReplicatedAccessToken token,
-                       Thread* myThread) :
+                       Thread* ownerThread) :
     // Unpack the SharedState struct into member variables
+    workerIdx(workerId),
     sharedHistory(sharedState.sharedHistories.at(token.get_numa_index())),
     threadIdx(threadId),
-    workerIdx(workerId),
     numaThreadIdx(numaThreadId),
     numaTotal(numaTotalThreads),
     numaAccessToken(token),
@@ -175,7 +175,7 @@ Search::Worker::Worker(SharedState&              sharedState,
     tt(sharedState.tt),
     networks(sharedState.networks),
     refreshTable(networks[token]),
-    myThread(myThread) {
+    myThread(ownerThread) {
     clear();
 }
 

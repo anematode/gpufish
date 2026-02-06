@@ -186,9 +186,6 @@ void Search::Worker::ensure_network_replicated() {
 }
 
 bool Worker::yield_to_next() {
-    if (disable_yielding)
-        return false;
-
     auto* thread = myThread;
     // cycle through other threads to find a yield target
     for (size_t i = 1; i < thread->workers.size(); i++)
@@ -253,15 +250,11 @@ void Search::Worker::start_searching() {
     // "ponderhit" just reset threads.ponder)
     threads.stop = true;
 
-    // std::cout << "Main thread waiting for search finished!\n";
-
-    // wait for other workers on this thread finish
+    // Wait for other workers on this thread to finish
     join_all_other_workers();
-    // std::cout << "Finished scheduling all workers, now waiting for the threads;\n";
 
     // Wait until all threads have finished
     threads.wait_for_search_finished();
-    // std::cout << "Main thread waited for search finished!\n";
 
     // When playing in 'nodes as time' mode, subtract the searched nodes from
     // the available ones before exiting.

@@ -334,7 +334,7 @@ class Worker {
 
     CustomStack contextStack;
     ucontext_t  activeContext;
-    bool        is_active, disable_yielding;
+    bool        is_active;
 
    public:
     void iterative_deepening();

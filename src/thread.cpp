@@ -95,7 +95,6 @@ thread_local Thread* curr_thread;
 
 static void start_searching_fwd(int idx) {
     Search::Worker* worker = curr_thread->workers[idx].get();
-    sf_assume(worker != nullptr);
 
     worker->start_searching();
     worker->is_active = false;
@@ -110,12 +109,8 @@ static void start_searching_fwd(int idx) {
     }
 }
 
-std::mutex mtx;
-
 // Wakes up the thread that will start the search
 void Thread::start_searching() {
-    // assert(worker != nullptr);
-
     run_custom_job([this]() {
         ucontext_t main;
 
@@ -134,7 +129,6 @@ void Thread::start_searching() {
             context.uc_stack.ss_sp   = worker->contextStack.mem;
 
             worker->is_active        = true;
-            worker->disable_yielding = false;
 
             makecontext(&worker->activeContext, reinterpret_cast<void (*)()>(&start_searching_fwd),
                         1, (int) i);
@@ -146,7 +140,6 @@ void Thread::start_searching() {
             bool has_more = false;
             for (auto& worker : workers)
             {
-                worker->disable_yielding = true;
                 if (!worker->is_active)
                     continue;
 
@@ -165,7 +158,6 @@ void Thread::start_searching() {
 
 // Clears the histories for the thread worker (usually before a new game)
 void Thread::clear_worker() {
-    //assert(worker != nullptr);
     run_custom_job([this]() {
         for (auto& worker : workers)
             worker->clear();

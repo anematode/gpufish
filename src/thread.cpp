@@ -128,7 +128,7 @@ void Thread::start_searching() {
             context.uc_stack.ss_size = worker->contextStack.size;
             context.uc_stack.ss_sp   = worker->contextStack.mem;
 
-            worker->is_active        = true;
+            worker->is_active = true;
 
             makecontext(&worker->activeContext, reinterpret_cast<void (*)()>(&start_searching_fwd),
                         1, (int) i);

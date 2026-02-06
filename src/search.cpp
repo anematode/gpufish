@@ -201,12 +201,10 @@ bool Worker::yield_to_next() {
 }
 
 void Worker::join_all_other_workers() {
-    disable_yielding = false;
     bool has_more;
     do
-    {
         has_more = yield_to_next();
-    } while (has_more);
+    while (has_more);
 }
 
 void Search::Worker::start_searching() {

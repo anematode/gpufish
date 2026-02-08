@@ -6,10 +6,6 @@
 
 #include "nnue/network.h"
 
-#define InstructionQueueSize 2048
-#define CacheLineSize 64
-#define ThreadsPerWarp 32
-
 // Credit: https://stackoverflow.com/a/14038590
 #define checkError(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 
@@ -39,7 +35,7 @@ namespace Stockfish::GPU
     {
         ScratchReg regs[ScratchRegCount];
 
-        int16_t *get_scratch(Instruction inst)
+        __device__ int16_t *get_scratch(Instruction inst)
         {
             return regs[inst.decode_wide_index()].data;
         }
@@ -87,40 +83,16 @@ namespace Stockfish::GPU
         }
     };
 
-    // Allocated on the host in pinned memory
-    struct RegisterMachine
-    {
-        Instruction queue[InstructionQueueSize];
-        alignas(CacheLineSize) volatile uint32_t head;
-        alignas(CacheLineSize) volatile uint32_t tail;
-
-        // Shared weights
-        WeightsData *weights;
-
-        // device-side data pointer
-        RegisterData *data;
-
-        __device__ bool devicePoll() const
-        {
-            return head == tail;
-        }
-
-        void submit(const Instruction* start, size_t count)
-        {
-            memcpy(queue + head, start, count * sizeof(Instruction));
-        }
-    };
-
     __device__ void cvt8_to_16(uint32_t data, uint32_t *l, uint32_t *h)
     {
         uint32_t lo, hi;
-        asm ("prmt.b32 %[lo],%[data],0,0x9180;\n"
-             "prmt.b32 %[hi],%[data],0,0xb3a2;" :  [lo]"=r"(lo), [hi]"=r"(hi) : [data]"r"(data));
+        asm ("prmt.b32 %0,%2,0,0x9180;\n"
+             "prmt.b32 %1,%2,0,0xb3a2;" :  "=r"(lo), "=r"(hi) : "r"(data));
         *l = lo;
         *h = hi;
     }
 
-    bool is_halfka_reg(Reg reg)
+    __device__ bool is_halfka_reg(Reg reg)
     {
         return reg == A || reg == B;
     }
@@ -156,7 +128,8 @@ namespace Stockfish::GPU
 
             // Warp leader polls the queue
             if (lane_id == 0) {
-                while (machine->devicePoll());
+                while (machine->head == machine->tail);
+
                 // todo exit somehow lol
                 inst = machine->queue[machine->tail];
             }
@@ -258,6 +231,7 @@ namespace Stockfish::GPU
                 break;
             }
             case ResetReg: {
+                printf("Reached!\n");
                 if (is_halfka_reg(inst.decode_reg()))
                 {
                     SWITCH_REG([&] (reg_t r)
@@ -295,12 +269,35 @@ namespace Stockfish::GPU
 
     CudaContext::~CudaContext()
     {
+        // Stop all machines
+        for (size_t i = 0; i < machineCount; i++)
+        {
+            machines[i].submit(Instruction::stop());
+        }
+
+        if (stream)
+            cudaStreamDestroy((cudaStream_t) stream);
+        stream = nullptr;
+
         for (int i = 0; i < machineCount; i++)
         {
             cudaFreeHost(machines[i].data);
         }
         cudaFree(machines);
         machines = nullptr;
+    }
+
+    void CudaContext::launch_persistent_kernel()
+    {
+        cudaStreamCreate((cudaStream_t*) &stream);
+
+        int num_warps = 10 * 4; // Example: 4 warps per SM on a high-end GPU
+        int threads_per_block = 128;
+        int num_blocks = (num_warps * 32 + threads_per_block - 1) / threads_per_block;
+
+        persistent_kernel<<<num_blocks, threads_per_block, 0, (cudaStream_t) stream>>>(machines, machineCount);
+
+        machines[0].submit(Instruction::zero_reg(A));
     }
 
     std::unique_ptr<CudaContext> make_context(const Eval::NNUE::NetworkBig& networks, size_t machine_count)

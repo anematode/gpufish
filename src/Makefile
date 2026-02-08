@@ -1157,7 +1157,7 @@ icx-profile-use:
 	all
 
 kernels.o: kernels.cu $(HEADERS)
-	nvcc kernels.cu -o kernels.o -O3
+	nvcc kernels.cu -o kernels.o -O3 --expt-relaxed-constexpr
 
 .depend: $(SRCS) kernels.cu
 	-@$(CXX) $(DEPENDFLAGS) -MM $(SRCS) > $@ 2> /dev/null

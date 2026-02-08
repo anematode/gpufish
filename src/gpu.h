@@ -7,14 +7,37 @@
 #include "gpu_defs.h"
 #include "nnue/network.h"
 
-
 namespace Stockfish::GPU
 {
-    struct RegisterMachine;
+    // Forward decls
     struct WeightsData;
+    struct RegisterData;
+
+    // Allocated on the host in pinned memory
+    struct RegisterMachine
+    {
+        void submit(Instruction instr)
+        {
+            queue[head++] = instr;
+            head %= InstructionQueueSize;
+        }
+
+        Instruction queue[InstructionQueueSize];
+        alignas(64) volatile uint32_t head;
+        alignas(64) volatile uint32_t tail;
+
+        // Shared weights
+        WeightsData *weights;
+
+        // device-side data pointer
+        RegisterData *data;
+    };
+
 
     class CudaContext
     {
+        void *stream = nullptr;
+
     public:
         RegisterMachine *machines;
         size_t machineCount;
@@ -25,31 +48,12 @@ namespace Stockfish::GPU
         CudaContext(const CudaContext&) = delete;
         CudaContext& operator=(const CudaContext&) = delete;
 
+        void launch_persistent_kernel();
         ~CudaContext();
     };
 
     std::unique_ptr<CudaContext> make_context(const Eval::NNUE::NetworkBig& networks, size_t machine_count);
 
-    // Per-thread accumulator stack instantiation that accepts update commands, which a GPU kernel will consume.
-    class AsyncAccStack {
-        static constexpr size_t MaxInstructionCount = 256;
-    public:
-        AsyncAccStack(RegisterMachine* ctx);
-        ~AsyncAccStack();
-
-        void submit_instruction(Instruction instr);
-        void commit();
-
-        [[nodiscard]] bool poll() const;
-        [[nodiscard]] std::array<int32_t, 16> read_l2_result() const;
-
-    private:
-        Instruction instrs[MaxInstructionCount] = {};
-
-        // Result obtained from GPU, will be piped into the subsequent layers
-        alignas(64) std::array<int32_t, 16> l1_result;
-        RegisterMachine* machine = nullptr;
-    };
 }
 
 

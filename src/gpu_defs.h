@@ -11,7 +11,8 @@
 
 #define ScratchRegCount 1024
 #define L1Size 1024
-
+#define InstructionQueueSize 2048
+#define ThreadsPerWarp 32
 
 namespace Stockfish::GPU
 {
@@ -59,23 +60,23 @@ namespace Stockfish::GPU
         static constexpr size_t RegIndexBits = 2;
         static constexpr size_t MaxBucket = 8;
 
-        static Instruction switch_to_machine(size_t index)
+        static constexpr Instruction switch_to_machine(size_t index)
         {
             assert(index < (1 << DataBits));
             return {  uint32_t((index << OpcodeBits) + SwitchMachine) };
         }
 
-        static void check_wide_index([[maybe_unused]] size_t idx)
+        static constexpr void check_wide_index([[maybe_unused]] size_t idx)
         {
             assert(idx < (1 << WideIndexBits));
         }
 
-        static void check_reg([[maybe_unused]] size_t idx)
+        static constexpr void check_reg([[maybe_unused]] size_t idx)
         {
             assert(idx < (1 << RegIndexBits));
         }
 
-        static Instruction make_mem_reg(Opcode opcode, Reg reg, size_t scratchIdx)
+        static constexpr Instruction make_mem_reg(Opcode opcode, Reg reg, size_t scratchIdx)
         {
             check_wide_index(scratchIdx);
             check_reg(reg);
@@ -84,34 +85,34 @@ namespace Stockfish::GPU
             };
         }
 
-        static Instruction load_scratch(Reg regDst, size_t scratchSrc)
+        static constexpr Instruction load_scratch(Reg regDst, size_t scratchSrc)
         {
             return make_mem_reg(LdScratch, regDst, scratchSrc);
         }
 
-        static Instruction store_scratch(size_t scratchDst, Reg regSrc)
+        static constexpr Instruction store_scratch(size_t scratchDst, Reg regSrc)
         {
             return make_mem_reg(StScratch, regSrc, scratchDst);
         }
 
-        static Instruction add_feature(Reg regDst, size_t featureIndex)
+        static constexpr Instruction add_feature(Reg regDst, size_t featureIndex)
         {
             return make_mem_reg(AddFeature, regDst, featureIndex);
         }
 
-        static Instruction sub_feature(Reg regDst, size_t featureIndex)
+        static constexpr Instruction sub_feature(Reg regDst, size_t featureIndex)
         {
             return make_mem_reg(SubFeature, regDst, featureIndex);
         }
 
-        static Instruction zero_reg(Reg regDst)
+        static constexpr Instruction zero_reg(Reg regDst)
         {
             return {
                 uint32_t(ResetReg + (regDst << OpcodeBits))
             };
         }
 
-        static Instruction write_l1(size_t bucketIdx)
+        static constexpr Instruction write_l1(size_t bucketIdx)
         {
             assert(bucketIdx < MaxBucket);
             return {
@@ -119,30 +120,35 @@ namespace Stockfish::GPU
             };
         }
 
-        Opcode opcode() const
+        static constexpr Instruction stop()
+        {
+            return { Exit };
+        }
+
+        constexpr Opcode opcode() const
         {
             return Opcode(data & 7);
         }
 
-        uint32_t machine_index() const
+        constexpr uint32_t machine_index() const
         {
             assert(opcode() == SwitchMachine);
             return data >> OpcodeBits;
         }
 
-        Reg decode_reg() const
+        constexpr Reg decode_reg() const
         {
             assert(opcode() == LdScratch || opcode() == StScratch || opcode() == AddFeature || opcode() == SubFeature);
             return Reg(data >> OpcodeBits & 3);
         }
 
-        uint32_t decode_wide_index() const
+        constexpr uint32_t decode_wide_index() const
         {
             assert(opcode() == LdScratch || opcode() == StScratch || opcode() == AddFeature || opcode() == SubFeature);
             return uint32_t(data >> (OpcodeBits + RegIndexBits));
         }
 
-        size_t decode_bucket() const
+        constexpr size_t decode_bucket() const
         {
             assert(opcode() == ComputeL1);
             return data >> OpcodeBits;

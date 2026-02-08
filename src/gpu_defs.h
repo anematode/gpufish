@@ -31,8 +31,10 @@ namespace Stockfish::GPU
         SubFeature = 4,
         // output_buf = sparse_matrix_multiply(M[bucket], pairwise_fuse((A + C), (B + D)))
         ComputeL1 = 5,
-        // Zero out register
-        ZeroReg = 7,
+        // Exit instruction loop
+        Exit = 6,
+        // Fill register with biases
+        ResetReg = 7,
     };
 
     enum Reg
@@ -105,7 +107,7 @@ namespace Stockfish::GPU
         static Instruction zero_reg(Reg regDst)
         {
             return {
-                uint32_t(ZeroReg + (regDst << OpcodeBits))
+                uint32_t(ResetReg + (regDst << OpcodeBits))
             };
         }
 

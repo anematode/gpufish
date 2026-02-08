@@ -26,8 +26,8 @@ static void gpuAssert(cudaError_t code, const char *file, int line)
 namespace Stockfish::GPU
 {
 
-    constexpr int RegI16Count = L1Size / ThreadsPerWarp;
-    constexpr int RegCount = RegI16Count / 2;  // each unsigned contains two 16-bit values
+    constexpr int L1EntriesPerThreadSlice = L1Size / ThreadsPerWarp;
+    constexpr int PtxRegsPerThreadSlice = L1EntriesPerThreadSlice / 2;  // each unsigned contains two 16-bit values
 
     struct ScratchReg
     {
@@ -39,9 +39,9 @@ namespace Stockfish::GPU
     {
         ScratchReg regs[ScratchRegCount];
 
-        int16_t *get(Instruction inst, uint32_t lane_id)
+        int16_t *get_scratch(Instruction inst)
         {
-            return regs[inst.decode_wide_index()].data + lane_id * RegI16Count;
+            return regs[inst.decode_wide_index()].data;
         }
     };
 
@@ -104,40 +104,10 @@ namespace Stockfish::GPU
         {
             return head == tail;
         }
-    };
 
-    class CudaContext
-    {
-    public:
-        RegisterMachine *machines;
-        size_t machineCount;
-        WeightsData weights;
-
-        CudaContext(const Eval::NNUE::NetworkBig& big, size_t machineCount) : machineCount(machineCount), weights(big)
+        void submit(const Instruction* start, size_t count)
         {
-            checkError(
-                cudaHostAlloc(&machines, machineCount * sizeof(RegisterMachine), cudaHostAllocMapped)
-            );
-
-            memset(machines, 0, machineCount * sizeof(RegisterMachine));
-            for (int i = 0; i < machineCount; i++) {
-                RegisterMachine *machine = &machines[i];
-
-                checkError(cudaMalloc(&machine->data, sizeof(RegisterData)));
-            }
-        }
-
-        CudaContext(const CudaContext&) = delete;
-        CudaContext& operator=(const CudaContext&) = delete;
-
-        ~CudaContext()
-        {
-            for (int i = 0; i < machineCount; i++)
-            {
-                cudaFreeHost(machines[i].data);
-            }
-            cudaFree(machines);
-            machines = nullptr;
+            memcpy(queue + head, start, count * sizeof(Instruction));
         }
     };
 
@@ -150,6 +120,11 @@ namespace Stockfish::GPU
         *h = hi;
     }
 
+    bool is_halfka_reg(Reg reg)
+    {
+        return reg == A || reg == B;
+    }
+
     __global__ void persistent_kernel(RegisterMachine* machines, int num_machines) {
         unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
         unsigned lane_id = threadIdx.x % ThreadsPerWarp;
@@ -159,12 +134,15 @@ namespace Stockfish::GPU
 
         RegisterMachine *machine = &machines[warp_id];
         RegisterData *data = machine->data;
+        auto* transformer = machine->weights->transformer;
+        auto* buckets = machine->weights->buckets;
 
-        typedef unsigned reg_t[RegCount];
-
+        typedef unsigned reg_t[PtxRegsPerThreadSlice];
         reg_t regA, regB, regC, regD;
 
-#define FOR_EACH_REG(X) switch (inst.decode_reg()) { \
+        uint32_t myL1Offset = L1EntriesPerThreadSlice * lane_id;
+
+#define SWITCH_REG(X) switch (inst.decode_reg()) { \
     case 0: { X(regA); break; } \
     case 1: { X(regB); break; } \
     case 2: { X(regC); break; } \
@@ -189,70 +167,144 @@ namespace Stockfish::GPU
             {
             case SwitchMachine:
                 break;
-            case LdScratch:
-            {
-                break;
-            }
-            case StScratch:
-            {
-                int16_t* scratch = data->get(inst, lane_id);
-
-            }
-            case AddFeature:
+            case Exit:
+                return;
+            case LdScratch: {
+                int16_t* scratch = data->get_scratch(inst);
+                SWITCH_REG([&] (reg_t r)
                 {
-                const int16_t* scratch = data->get(inst, lane_id);
-                if (inst.decode_reg().)
-#define X(reg) _Pragma("unroll") for (int i = 0; i < RegCount; i++) { \
-                    unsigned val; \
-                    memcpy(&val, &scratch[2 * i], 4); \
-                    reg[i] = __vadd2(reg[i], val); \
+                    memcpy(r, &scratch[myL1Offset], sizeof(reg_t));
+                })
+            }
+            case StScratch: {
+                int16_t* scratch = data->get_scratch(inst);
+                SWITCH_REG([&] (reg_t r)
+                {
+                    memcpy(&scratch[myL1Offset], r, sizeof(reg_t));
+                })
+            }
+            case AddFeature: {
+                uint32_t index = inst.decode_wide_index();
+                if (is_halfka_reg(inst.decode_reg()))
+                {
+                    const int16_t *weights = &transformer->weights[index * L1Size] + myL1Offset;
+                    SWITCH_REG([&] (reg_t r)
+                    {
+                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++) {
+                            unsigned val;
+                            memcpy(&val, &weights[2 * i], 4);
+                            r[i] = __vadd2(r[i], val);
+                        }
+                    })
+                } else {
+                    const int8_t *weights = &transformer->threatWeights[index * L1Size] + myL1Offset;
+                    SWITCH_REG(([&] (reg_t r)
+                    {
+                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 2) {
+                            unsigned val, l, h;
+                            memcpy(&val, &weights[4 * i], 4);
+                            cvt8_to_16(val, &l, &h);
+                            r[i] = __vadd2(r[i], l);
+                            r[i + 1] = __vadd2(r[i + 1], h);
+                        }
+                    }))
                 }
-                FOR_EACH_REG(X)
                 break;
             }
             case SubFeature:
-                break;
-            case ComputeL1:
-                break;
-            case ZeroReg:
+            {
+                uint32_t index = inst.decode_wide_index();
+                if (is_halfka_reg(inst.decode_reg()))
                 {
-#undef X
-#define X(reg) _Pragma("unroll") for (int i = 0; i < RegCount; i++) reg[i] = 0;
-                    FOR_EACH_REG(X)
-
-                    break;
+                    const int16_t *weights = &transformer->weights[index * L1Size] + myL1Offset;
+                    SWITCH_REG([&] (reg_t r)
+                    {
+                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++) {
+                            unsigned val;
+                            memcpy(&val, &weights[2 * i], 4);
+                            r[i] = __vsub2(r[i], val);
+                        }
+                    })
+                } else {
+                    const int8_t *weights = &transformer->threatWeights[index * L1Size] + myL1Offset;
+                    SWITCH_REG(([&] (reg_t r)
+                    {
+                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 2) {
+                            unsigned val, l, h;
+                            memcpy(&val, &weights[4 * i], 4);
+                            cvt8_to_16(val, &l, &h);
+                            r[i] = __vsub2(r[i], l);
+                            r[i + 1] = __vsub2(r[i + 1], h);
+                        }
+                    }))
                 }
+                break;
             }
+            case ComputeL1: {
+                /*Eval::NNUE::L1Bucket* bucket = &buckets[inst.decode_bucket()];
+                int32_t data[16];
 
-            // 2. Execution (Warp-parallel)
-            if (inst.opcode == OP_ADD) {
-                for (int k = lane_id; k < cols; k += 32) {
-                    matrix[inst.i * cols + k] += matrix[inst.j * cols + k];
-                }
-            } else if (inst.opcode == OP_READSUM) {
-                float sum = 0;
-                for (int k = lane_id; k < cols; k += 32) {
-                    sum += matrix[inst.i * cols + k];
-                }
-                // Warp reduction using shuffles
-                for (int offset = 16; offset > 0; offset /= 2)
-                    sum += __shfl_down_sync(0xFFFFFFFF, sum, offset);
+                for (int i = 0; i < PtxRegsPerThreadSlice; i++)
+                {
 
-                if (lane_id == 0) {
-                    q->commands[q->tail].result = sum;
-                    __threadfence_system();
-                    q->commands[q->tail].status = DONE;
                 }
+
+                #pragma unroll
+                for (int i = 0; i < 16; ++i) {
+                    for (int offset = 16; offset > 0; offset /= 2) {
+                        data[i] += __shfl_down_sync(0xFFFFFFFF, data[i], offset);
+                    }
+                }*/
+                break;
+            }
+            case ResetReg: {
+                if (is_halfka_reg(inst.decode_reg()))
+                {
+                    SWITCH_REG([&] (reg_t r)
+                    {
+                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++)
+                        {
+                            r[i] = 0;
+                        }
+                    })
+                }
+
+                break;
+            }
             }
 
             if (lane_id == 0) {
-                machine->tail = (machine->tail + 1) % QUEUE_SIZE;
+                machine->tail = (machine->tail + 1) % InstructionQueueSize;
             }
         }
     }
 
-    std::unique_ptr<CudaContext> make_context()
+    CudaContext::CudaContext(const Eval::NNUE::NetworkBig& big, size_t machineCount): machineCount(machineCount), weights(std::make_unique<WeightsData>(big))
     {
+        checkError(
+            cudaHostAlloc(&machines, machineCount * sizeof(RegisterMachine), cudaHostAllocMapped)
+        );
 
+        memset(machines, 0, machineCount * sizeof(RegisterMachine));
+        for (int i = 0; i < machineCount; i++) {
+            RegisterMachine *machine = &machines[i];
+
+            checkError(cudaMalloc(&machine->data, sizeof(RegisterData)));
+        }
+    }
+
+    CudaContext::~CudaContext()
+    {
+        for (int i = 0; i < machineCount; i++)
+        {
+            cudaFreeHost(machines[i].data);
+        }
+        cudaFree(machines);
+        machines = nullptr;
+    }
+
+    std::unique_ptr<CudaContext> make_context(const Eval::NNUE::NetworkBig& networks, size_t machine_count)
+    {
+        return std::make_unique<CudaContext>(networks, machine_count);
     }
 }

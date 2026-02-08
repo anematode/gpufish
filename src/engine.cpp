@@ -296,6 +296,12 @@ void Engine::verify_networks() const {
 void Engine::load_networks() {
     networks.modify_and_replicate([this](NN::Networks& networks_) {
         networks_.big.load(binaryDirectory, options["EvalFile"]);
+
+        cudaContext = std::make_unique<GPU::CudaContext>(networks_.big, 8);
+
+        cudaContext->launch_persistent_kernel();
+
+        exit(0);
     });
     threads.clear();
     threads.ensure_network_replicated();

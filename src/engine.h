@@ -38,10 +38,10 @@
 #include "thread.h"
 #include "tt.h"
 #include "ucioption.h"
+#include "gpu.h"
 
 namespace Stockfish {
-
-class Engine {
+    class Engine {
    public:
     using InfoShort = Search::InfoShort;
     using InfoFull  = Search::InfoFull;
@@ -113,6 +113,7 @@ class Engine {
     const std::string binaryDirectory;
 
     NumaReplicationContext numaContext;
+    std::unique_ptr<GPU::CudaContext> cudaContext;
 
     Position     pos;
     StateListPtr states;

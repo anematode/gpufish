@@ -239,6 +239,19 @@ class AffineTransformSparseInput {
         return !stream.fail();
     }
 
+    std::vector<int32_t> get_biases() const
+    {
+        return { biases, biases + OutputDimensions };
+    }
+
+    std::vector<int8_t> get_weights() const
+    {
+        std::vector<WeightType> result;
+        for (IndexType i = 0; i < OutputDimensions * PaddedInputDimensions; ++i)
+            result.push_back(weights[get_weight_index(i)]);
+        return result;
+    }
+
     std::size_t get_content_hash() const {
         std::size_t h = 0;
         hash_combine(h, get_raw_data_hash(biases));
@@ -362,7 +375,6 @@ class AffineTransformSparseInput {
 #endif
     }
 
-   private:
     using BiasType   = OutputType;
     using WeightType = std::int8_t;
 

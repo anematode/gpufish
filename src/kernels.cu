@@ -141,6 +141,15 @@ namespace Stockfish::GPU
         }
     };
 
+    __device__ void cvt8_to_16(uint32_t data, uint32_t *l, uint32_t *h)
+    {
+        uint32_t lo, hi;
+        asm ("prmt.b32 %[lo],%[data],0,0x9180;\n"
+             "prmt.b32 %[hi],%[data],0,0xb3a2;" :  [lo]"=r"(lo), [hi]"=r"(hi) : [data]"r"(data));
+        *l = lo;
+        *h = hi;
+    }
+
     __global__ void persistent_kernel(RegisterMachine* machines, int num_machines) {
         unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
         unsigned lane_id = threadIdx.x % ThreadsPerWarp;
@@ -192,14 +201,15 @@ namespace Stockfish::GPU
             case AddFeature:
                 {
                 const int16_t* scratch = data->get(inst, lane_id);
+                if (inst.decode_reg().)
 #define X(reg) _Pragma("unroll") for (int i = 0; i < RegCount; i++) { \
-unsigned val; \
-memcpy(&val, &scratch[2 * i], 4); \
-reg[i] = __vadd2(reg[i], val); \
-}
-                    FOR_EACH_REG(X)
-                break;
+                    unsigned val; \
+                    memcpy(&val, &scratch[2 * i], 4); \
+                    reg[i] = __vadd2(reg[i], val); \
                 }
+                FOR_EACH_REG(X)
+                break;
+            }
             case SubFeature:
                 break;
             case ComputeL1:

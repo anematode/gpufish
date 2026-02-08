@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <memory>
 
+#include "../../../../../usr/local/gcc-15.2.0/include/c++/15.2.0/bits/this_thread_sleep.h"
 #include "nnue/network.h"
 
 // Credit: https://stackoverflow.com/a/14038590
@@ -56,7 +57,7 @@ namespace Stockfish::GPU
             temp->unpermute_weights();
 
             checkError(cudaMalloc(&this->transformer, sizeof(transformer)));
-            checkError(cudaMemcpy(this->transformer, &temp, sizeof(transformer), cudaMemcpyHostToDevice));
+            checkError(cudaMemcpy(this->transformer, &*temp, sizeof(transformer), cudaMemcpyHostToDevice));
 
             size_t bc = sparse_input_buckets.size();
             checkError(cudaMalloc(&buckets, sizeof(*sparse_input_buckets[0]) * bc));
@@ -141,6 +142,7 @@ namespace Stockfish::GPU
             case SwitchMachine:
                 break;
             case Exit:
+                printf("Exiting!");
                 return;
             case LdScratch: {
                 int16_t* scratch = data->get_scratch(inst);
@@ -148,6 +150,7 @@ namespace Stockfish::GPU
                 {
                     memcpy(r, &scratch[myL1Offset], sizeof(reg_t));
                 })
+                break;
             }
             case StScratch: {
                 int16_t* scratch = data->get_scratch(inst);
@@ -155,6 +158,7 @@ namespace Stockfish::GPU
                 {
                     memcpy(&scratch[myL1Offset], r, sizeof(reg_t));
                 })
+                break;
             }
             case AddFeature: {
                 uint32_t index = inst.decode_wide_index();
@@ -213,7 +217,7 @@ namespace Stockfish::GPU
                 }
                 break;
             }
-            case ComputeL1: {
+            case Finalize: {
                 /*Eval::NNUE::L1Bucket* bucket = &buckets[inst.decode_bucket()];
                 int32_t data[16];
 
@@ -231,15 +235,23 @@ namespace Stockfish::GPU
                 break;
             }
             case ResetReg: {
-                printf("Reached!\n");
                 if (is_halfka_reg(inst.decode_reg()))
                 {
                     SWITCH_REG([&] (reg_t r)
                     {
                         _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++)
                         {
-                            r[i] = 0;
+                            uint32_t val;
+                            memcpy(&val, transformer->biases.data() + myL1Offset + 2 * i, 4);
+                            r[i] = val;
                         }
+                    })
+                } else
+                {
+                    SWITCH_REG([&] (reg_t r)
+                    {
+                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++)
+                            r[i] = 0;
                     })
                 }
 
@@ -253,6 +265,15 @@ namespace Stockfish::GPU
         }
     }
 
+    std::array<int16_t, 1024> RegisterMachine::read_scratch(size_t index)
+    {
+        std::array<int16_t, 1024> array;
+        printf("1");
+        checkError(cudaMemcpy(&array, &data->regs[index], sizeof(array), cudaMemcpyDeviceToHost));
+        printf("2");
+        return array;
+    }
+
     CudaContext::CudaContext(const Eval::NNUE::NetworkBig& big, size_t machineCount): machineCount(machineCount), weights(std::make_unique<WeightsData>(big))
     {
         checkError(
@@ -264,16 +285,27 @@ namespace Stockfish::GPU
             RegisterMachine *machine = &machines[i];
 
             checkError(cudaMalloc(&machine->data, sizeof(RegisterData)));
+            machine->weights = weights.get();
         }
     }
 
-    CudaContext::~CudaContext()
+    void CudaContext::stop_all()
     {
+        if (!stream)
+            return;
         // Stop all machines
         for (size_t i = 0; i < machineCount; i++)
         {
             machines[i].submit(Instruction::stop());
         }
+
+        cudaStreamSynchronize((cudaStream_t) stream);
+        stream = nullptr;
+    }
+
+    CudaContext::~CudaContext()
+    {
+        stop_all();
 
         if (stream)
             cudaStreamDestroy((cudaStream_t) stream);
@@ -289,15 +321,33 @@ namespace Stockfish::GPU
 
     void CudaContext::launch_persistent_kernel()
     {
-        cudaStreamCreate((cudaStream_t*) &stream);
+        if (stream)
+        {
+            std::cout << "Already created the kernel\n";
+        }
+        printf("Reached\n");
+        checkError(cudaStreamCreate((cudaStream_t*) &stream));
 
         int num_warps = 10 * 4; // Example: 4 warps per SM on a high-end GPU
         int threads_per_block = 128;
         int num_blocks = (num_warps * 32 + threads_per_block - 1) / threads_per_block;
 
+        printf("Reached\n");
         persistent_kernel<<<num_blocks, threads_per_block, 0, (cudaStream_t) stream>>>(machines, machineCount);
 
-        machines[0].submit(Instruction::zero_reg(A));
+        machines[0].submit(Instruction::reset_reg(A));
+        machines[0].submit(Instruction::store_scratch(10, A));
+        machines[0].submit(Instruction::stop());
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        stop_all();
+
+        printf("Reached!!!\n");
+        auto result = machines[0].read_scratch(10);
+        for (int i : result)
+        {
+            std::cout << i << ' ' << std::endl;
+        }
     }
 
     std::unique_ptr<CudaContext> make_context(const Eval::NNUE::NetworkBig& networks, size_t machine_count)

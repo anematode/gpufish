@@ -31,7 +31,7 @@ namespace Stockfish::GPU
         //    - like above
         SubFeature = 4,
         // output_buf = sparse_matrix_multiply(M[bucket], pairwise_fuse((A + C), (B + D)))
-        ComputeL1 = 5,
+        Finalize = 5,
         // Exit instruction loop
         Exit = 6,
         // Fill register with biases
@@ -58,6 +58,7 @@ namespace Stockfish::GPU
         static constexpr size_t MaxMachineIndex = 1 << DataBits;
         static constexpr size_t WideIndexBits = 18;
         static constexpr size_t RegIndexBits = 2;
+        static constexpr size_t BucketBits = 3;
         static constexpr size_t MaxBucket = 8;
 
         static constexpr Instruction switch_to_machine(size_t index)
@@ -105,18 +106,18 @@ namespace Stockfish::GPU
             return make_mem_reg(SubFeature, regDst, featureIndex);
         }
 
-        static constexpr Instruction zero_reg(Reg regDst)
+        static constexpr Instruction reset_reg(Reg regDst)
         {
             return {
                 uint32_t(ResetReg + (regDst << OpcodeBits))
             };
         }
 
-        static constexpr Instruction write_l1(size_t bucketIdx)
+        static constexpr Instruction finalize(size_t bucketIdx, bool stm)
         {
             assert(bucketIdx < MaxBucket);
             return {
-                uint32_t((bucketIdx << OpcodeBits) + ComputeL1)
+                uint32_t((stm << (OpcodeBits + BucketBits)) + (bucketIdx << OpcodeBits) + Finalize)
             };
         }
 
@@ -138,7 +139,7 @@ namespace Stockfish::GPU
 
         constexpr Reg decode_reg() const
         {
-            assert(opcode() == LdScratch || opcode() == StScratch || opcode() == AddFeature || opcode() == SubFeature);
+            assert(opcode() == LdScratch || opcode() == StScratch || opcode() == AddFeature || opcode() == SubFeature || opcode() == ResetReg);
             return Reg(data >> OpcodeBits & 3);
         }
 
@@ -150,8 +151,14 @@ namespace Stockfish::GPU
 
         constexpr size_t decode_bucket() const
         {
-            assert(opcode() == ComputeL1);
+            assert(opcode() == Finalize);
             return data >> OpcodeBits;
+        }
+
+        constexpr int side_to_move() const
+        {
+            assert(opcode() == Finalize);
+            return data >> (OpcodeBits + BucketBits);
         }
     };
 }

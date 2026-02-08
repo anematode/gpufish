@@ -22,6 +22,8 @@ namespace Stockfish::GPU
             head %= InstructionQueueSize;
         }
 
+        std::array<int16_t, L1Size> read_scratch(size_t index);
+
         Instruction queue[InstructionQueueSize];
         alignas(64) volatile uint32_t head;
         alignas(64) volatile uint32_t tail;
@@ -44,6 +46,7 @@ namespace Stockfish::GPU
         std::unique_ptr<WeightsData> weights;
 
         CudaContext(const Eval::NNUE::NetworkBig& big, size_t machineCount);
+        void stop_all();
 
         CudaContext(const CudaContext&) = delete;
         CudaContext& operator=(const CudaContext&) = delete;

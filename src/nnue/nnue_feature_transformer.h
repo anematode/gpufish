@@ -409,7 +409,7 @@ class FeatureTransformer {
         return psqt;
     }  // end of function transform()
 
-    alignas(CacheLineSize) std::array<BiasType, HalfDimensions> biases;
+    alignas(CacheLineSize) std::array<BiasType, HalfDimensions> biases;`
     alignas(CacheLineSize) std::array<WeightType, HalfDimensions * InputDimensions> weights;
     alignas(CacheLineSize)
       std::array<ThreatWeightType,

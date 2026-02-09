@@ -45,8 +45,10 @@ namespace Stockfish::GPU
         bool isActive;
 
         void* stream;
-        Instruction queue[MaxInstructionsCount];
         uint32_t queueIndex;
+
+        alignas(64) volatile uint32_t instructionCount;
+        Instruction queue[MaxInstructionsCount];
 
         // Result is written here by GPU. So that we keep the transfer to 64 bytes, we repurpose
         // result[i] == INT_MIN to mean "not (yet) written", and rely on 4-byte stores (at least) to

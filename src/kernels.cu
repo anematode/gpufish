@@ -33,11 +33,6 @@ namespace Stockfish::GPU
     // Device-side data that lives only in GPU memory
     struct RegisterData
     {
-        // A sequence of instructions is read from here
-        Instruction instructions[MaxInstructionsCount];
-        // This flag gives the number of instructions written
-        volatile int instructionCount;
-
         ScratchReg regs[ScratchRegCount];
 
         __device__ int16_t *get_scratch(Instruction inst)
@@ -114,8 +109,8 @@ namespace Stockfish::GPU
         auto* transformer = machine->weights->transformer;
         auto* buckets = machine->weights->buckets;
 
-        Instruction* instructionBuffer = data->instructions;
-        volatile int* instructionCountPtr = &data->instructionCount;
+        Instruction* instructionBuffer = machine->queue;
+        auto* instructionCountPtr = &machine->instructionCount;
 
         typedef unsigned reg_t[PtxRegsPerThreadSlice];
         reg_t regA, regB, regC, regD;
@@ -141,7 +136,6 @@ namespace Stockfish::GPU
                 {
                     __nanosleep(50);  // TODO better approach here?
                 }
-                *instructionCountPtr = 0;
             }
 
             uint32_t mask = __activemask();
@@ -285,6 +279,7 @@ namespace Stockfish::GPU
             // Signal to the CPU that we're done with this batch
             if (lane_id == 0)
             {
+                *instructionCountPtr = 0;
                 machine->result[0] = 1;
             }
         }
@@ -326,12 +321,7 @@ namespace Stockfish::GPU
         if (queueIndex == 0)
             return;
         std::fill_n(result, 16, INT_MIN);
-        checkError(
-            cudaMemcpyAsync(&data->instructions, queue, sizeof(Instruction) * queueIndex, cudaMemcpyHostToDevice, (cudaStream_t) stream)
-        );
-        // Signal that there are a nonzero number of instructions to consume
-        checkError(cudaMemcpyAsync((int*)&data->instructionCount, &queueIndex, sizeof(uint32_t), cudaMemcpyHostToDevice,
-                        (cudaStream_t)stream));
+        instructionCount = queueIndex;
     }
 
     void RegisterMachine::blockUntilComplete()
@@ -344,11 +334,12 @@ namespace Stockfish::GPU
         // TODO verify that all entries are written
 
         queueIndex = 0;
+        instructionCount = 0;
     }
 
     bool RegisterMachine::ready() const
     {
-        return result[0] != INT_MIN;
+        return result[0] != INT_MIN || instructionCount == 0;
     }
 
     std::array<int16_t, 1024> RegisterMachine::read_scratch(size_t index)

@@ -113,6 +113,7 @@ namespace Stockfish::GPU
         typedef unsigned reg_t[PtxRegsPerThreadSlice];
         reg_t regA, regB, regC, regD;
 
+        uint32_t tail = machine->tail;
         uint32_t myL1Offset = L1EntriesPerThreadSlice * lane_id;
 
 #define SWITCH_REG(X) switch (inst.decode_reg()) { \
@@ -129,13 +130,13 @@ namespace Stockfish::GPU
 
             // Warp leader polls the queue
             if (lane_id == 0) {
-                while (machine->head == machine->tail)
+                while (machine->head == tail)
                 {
                     __nanosleep(50);
                 }
 
                 // todo exit somehow lol
-                inst = machine->queue[machine->tail];
+                inst = machine->queue[tail];
             }
 
             uint32_t mask = __activemask();
@@ -146,7 +147,6 @@ namespace Stockfish::GPU
                 break;
             case Exit:
                 return;
-#if 0
             case LdScratch: {
                 int16_t* scratch = data->get_scratch(inst);
                 SWITCH_REG([&] (reg_t r)
@@ -263,11 +263,11 @@ namespace Stockfish::GPU
 
                 break;
             }
-#endif
             }
 
             if (lane_id == 0) {
-                machine->tail = (machine->tail + 1) % InstructionQueueSize;
+                tail = (tail + 1) % InstructionQueueSize;
+                machine->tail = tail;
             }
         }
     }

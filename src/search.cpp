@@ -155,6 +155,7 @@ bool is_shuffling(Move move, Stack* const ss, const Position& pos) {
 }  // namespace
 
 Search::Worker::Worker(SharedState&              sharedState,
+                        GPU::RegisterMachine*    machine,
                        ISearchManager&           sm,
                        size_t                    threadId,
                        size_t                    workerId,
@@ -175,7 +176,8 @@ Search::Worker::Worker(SharedState&              sharedState,
     tt(sharedState.tt),
     networks(sharedState.networks),
     refreshTable(networks[token]),
-    myThread(ownerThread) {
+    myThread(ownerThread),
+    registerMachine(machine) {
     clear();
 }
 
@@ -208,7 +210,9 @@ void Worker::join_all_other_workers() {
 }
 
 void Search::Worker::start_searching() {
-    accumulatorStack.reset();
+    uint32_t idx = 0;
+    accumulatorStack.reset(idx);
+    refreshTable.assign_indices(idx);
 
     // Non-main threads go directly to iterative_deepening()
     if (!is_mainthread())
@@ -644,6 +648,15 @@ void Search::Worker::clear() {
         reductions[i] = int(2747 / 128.0 * std::log(i));
 
     refreshTable.clear(networks[numaAccessToken]);
+    registerMachine->submit(GPU::Instruction::reset_reg(GPU::A));
+    accumulatorStack.machine = registerMachine;;
+    for (auto& r : refreshTable.big.entries)
+    {
+        for (auto & ent : r)
+        {
+            registerMachine->submit(GPU::Instruction::store_scratch(ent.scratchIndex, GPU::A));
+        }
+    }
 }
 
 

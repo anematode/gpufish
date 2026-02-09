@@ -128,6 +128,7 @@ trace(Position& pos, const Eval::NNUE::Networks& networks, Eval::NNUE::Accumulat
     Value base              = psqt + positional;
     base                    = pos.side_to_move() == WHITE ? base : -base;
 
+    uint32_t idx = 0;
     for (File f = FILE_A; f <= FILE_H; ++f)
         for (Rank r = RANK_1; r <= RANK_8; ++r)
         {
@@ -139,7 +140,7 @@ trace(Position& pos, const Eval::NNUE::Networks& networks, Eval::NNUE::Accumulat
             {
                 pos.remove_piece(sq);
 
-                accumulators->reset();
+                accumulators->reset(idx);
                 std::tie(psqt, positional) = networks.big.evaluate(pos, *accumulators, caches.big);
                 Value eval                 = psqt + positional;
                 eval                       = pos.side_to_move() == WHITE ? eval : -eval;
@@ -156,7 +157,7 @@ trace(Position& pos, const Eval::NNUE::Networks& networks, Eval::NNUE::Accumulat
         ss << board[row] << '\n';
     ss << '\n';
 
-    accumulators->reset();
+    accumulators->reset(idx);
     auto t = networks.big.trace_evaluate(pos, *accumulators, caches.big);
 
     ss << " NNUE network contributions "

@@ -28,6 +28,7 @@
 #include <mutex>
 #include <vector>
 
+#include "gpu.h"
 #include "memory.h"
 #include "numa.h"
 #include "position.h"
@@ -36,6 +37,7 @@
 
 namespace Stockfish {
 
+const int WorkersPerThread = 8;
 
 class OptionsMap;
 using Value = int;
@@ -167,6 +169,7 @@ class ThreadPool {
     StateListPtr                         setupStates;
     std::vector<std::unique_ptr<Thread>> threads;
     std::vector<NumaIndex>               boundThreadToNumaNode;
+    std::unique_ptr<GPU::CudaContext>    cudaContext;
 
     uint64_t accumulate(std::atomic<uint64_t> Search::Worker::* member) const {
 

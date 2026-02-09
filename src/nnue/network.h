@@ -103,7 +103,7 @@ class Network {
     }
 
 
-private:
+public:
     void load_user_net(const std::string&, const std::string&);
     void load_internal();
 
@@ -132,7 +132,7 @@ private:
     // Hash value of evaluation function structure
     static constexpr std::uint32_t hash = Transformer::get_hash_value() ^ Arch::get_hash_value();
 
-    template<IndexType Size>
+    template <IndexType Size>
     friend struct AccumulatorCaches::Cache;
 };
 

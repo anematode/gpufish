@@ -113,7 +113,6 @@ namespace Stockfish {
     const std::string binaryDirectory;
 
     NumaReplicationContext numaContext;
-    std::unique_ptr<GPU::CudaContext> cudaContext;
 
     Position     pos;
     StateListPtr states;

@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <cstddef>
 
-#define ScratchRegCount 1024
+#define ScratchRegCount 2048
 #define L1Size 1024
 #define InstructionQueueSize 2048
 #define ThreadsPerWarp 32
@@ -155,10 +155,10 @@ namespace Stockfish::GPU
             return data >> OpcodeBits;
         }
 
-        constexpr int side_to_move() const
+        constexpr bool side_to_move() const
         {
             assert(opcode() == Finalize);
-            return data >> (OpcodeBits + BucketBits);
+            return bool(data >> (OpcodeBits + BucketBits));
         }
     };
 }

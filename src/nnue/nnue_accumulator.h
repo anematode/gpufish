@@ -31,8 +31,14 @@
 #include "nnue_architecture.h"
 #include "nnue_common.h"
 
-namespace Stockfish {
-class Position;
+
+namespace Stockfish::GPU
+{
+    struct RegisterMachine;
+}
+namespace Stockfish
+{
+    class Position;
 }
 
 namespace Stockfish::Eval::NNUE {
@@ -73,6 +79,7 @@ struct AccumulatorCaches {
             std::array<PSQTWeightType, PSQTBuckets> psqtAccumulation;
             std::array<Piece, SQUARE_NB>            pieces;
             Bitboard                                pieceBB;
+            uint32_t scratchIndex;
 
             // To initialize a refresh entry, we set all its bitboards empty,
             // so we put the biases in the accumulation, without any weights on top
@@ -100,6 +107,17 @@ struct AccumulatorCaches {
         big.clear(networks.big);
     }
 
+    void assign_indices(uint32_t& idx)
+    {
+        for (auto& a : big.entries)
+        {
+            for (auto& b : a)
+            {
+                b.scratchIndex = idx++;
+            }
+        }
+    }
+
     Cache<TransformedFeatureDimensionsBig> big;
 };
 
@@ -108,6 +126,7 @@ template<typename FeatureSet>
 struct AccumulatorState {
     Accumulator<TransformedFeatureDimensionsBig> accumulatorBig;
     typename FeatureSet::DiffType                diff;
+    uint32_t scratchSlot[2];
 
     template<IndexType Size>
     auto& acc() noexcept {
@@ -147,7 +166,7 @@ class AccumulatorStack {
     template<typename T>
     [[nodiscard]] const AccumulatorState<T>& latest() const noexcept;
 
-    void                                  reset() noexcept;
+    void                                  reset(uint32_t& idx) noexcept;
     std::pair<DirtyPiece&, DirtyThreats&> push() noexcept;
     void                                  pop() noexcept;
 
@@ -155,6 +174,8 @@ class AccumulatorStack {
     void evaluate(const Position&                       pos,
                   const FeatureTransformer<Dimensions>& featureTransformer,
                   AccumulatorCaches::Cache<Dimensions>& cache) noexcept;
+
+    GPU::RegisterMachine* machine;
 
    private:
     template<typename T>

@@ -124,12 +124,15 @@ namespace Stockfish::GPU
     };
 
         while (true) {
-            __shared__ Instruction current_cmd[64];
+            __shared__ Instruction current_cmd[256];
             Instruction& inst = current_cmd[threadIdx.x / 32];
 
             // Warp leader polls the queue
             if (lane_id == 0) {
-                while (machine->head == machine->tail);
+                while (machine->head == machine->tail)
+                {
+                    __nanosleep(50);
+                }
 
                 // todo exit somehow lol
                 inst = machine->queue[machine->tail];
@@ -142,8 +145,8 @@ namespace Stockfish::GPU
             case SwitchMachine:
                 break;
             case Exit:
-                printf("Exiting!");
                 return;
+#if 0
             case LdScratch: {
                 int16_t* scratch = data->get_scratch(inst);
                 SWITCH_REG([&] (reg_t r)
@@ -232,6 +235,9 @@ namespace Stockfish::GPU
                         data[i] += __shfl_down_sync(0xFFFFFFFF, data[i], offset);
                     }
                 }*/
+
+                machine->result[0] = 1;
+                __threadfence_system();
                 break;
             }
             case ResetReg: {
@@ -257,6 +263,7 @@ namespace Stockfish::GPU
 
                 break;
             }
+#endif
             }
 
             if (lane_id == 0) {
@@ -303,6 +310,12 @@ namespace Stockfish::GPU
         stream = nullptr;
     }
 
+RegisterMachine* CudaContext::get_machine(size_t size)
+    {
+        assert(size < machineCount);
+        return &machines[size];
+    }
+
     CudaContext::~CudaContext()
     {
         stop_all();
@@ -324,30 +337,15 @@ namespace Stockfish::GPU
         if (stream)
         {
             std::cout << "Already created the kernel\n";
+            return;
         }
-        printf("Reached\n");
+
         checkError(cudaStreamCreate((cudaStream_t*) &stream));
 
-        int num_warps = 10 * 4; // Example: 4 warps per SM on a high-end GPU
-        int threads_per_block = 128;
-        int num_blocks = (num_warps * 32 + threads_per_block - 1) / threads_per_block;
+        int threads_per_block = 32;
+        int num_blocks = machineCount;
 
-        printf("Reached\n");
         persistent_kernel<<<num_blocks, threads_per_block, 0, (cudaStream_t) stream>>>(machines, machineCount);
-
-        machines[0].submit(Instruction::reset_reg(A));
-        machines[0].submit(Instruction::store_scratch(10, A));
-        machines[0].submit(Instruction::stop());
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        stop_all();
-
-        printf("Reached!!!\n");
-        auto result = machines[0].read_scratch(10);
-        for (int i : result)
-        {
-            std::cout << i << ' ' << std::endl;
-        }
     }
 
     std::unique_ptr<CudaContext> make_context(const Eval::NNUE::NetworkBig& networks, size_t machine_count)

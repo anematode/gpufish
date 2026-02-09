@@ -290,6 +290,7 @@ void ThreadPool::set(const NumaConfig&                           numaConfig,
 
         cudaContext = std::make_unique<GPU::CudaContext>(sharedState.networks->big, requested * WorkersPerThread);
         sharedState.cudaContext = cudaContext.get();
+        cudaContext->launch_persistent_kernel();  // needed for setup -- should probably have non-persistent option for setup
 
         while (threads.size() < requested)
         {
@@ -320,6 +321,7 @@ void ThreadPool::set(const NumaConfig&                           numaConfig,
                 create_thread();
         }
 
+        cudaContext->stop_all();
         clear();
 
         main_thread()->wait_for_search_finished();

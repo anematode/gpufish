@@ -177,11 +177,6 @@ NetworkOutput Network<Arch, Transformer>::evaluate(const Position&   pos,
 
 
     constexpr uint64_t alignment = CacheLineSize;
-    if (worker)
-    {
-        worker->yield_to_next();
-    }
-
     alignas(alignment)
       TransformedFeatureType transformedFeatures[FeatureTransformer<FTDimensions>::BufferSize];
 
@@ -189,7 +184,15 @@ NetworkOutput Network<Arch, Transformer>::evaluate(const Position&   pos,
 
     const int  bucket = (pos.count<ALL_PIECES>() - 1) / 4;
     const auto psqt =
-      featureTransformer.transform(pos, accumulatorStack, cache, transformedFeatures, bucket);
+        featureTransformer.transform(pos, accumulatorStack, cache, transformedFeatures, bucket);
+
+    if (worker)
+    {
+        worker->registerMachine->flush();
+        worker->yield_to_next();
+        worker->registerMachine->blockUntilComplete();
+    }
+
     const auto positional = network[bucket].propagate(transformedFeatures);
     return {static_cast<Value>(psqt / OutputScale), static_cast<Value>(positional / OutputScale)};
 }

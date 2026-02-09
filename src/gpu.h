@@ -3,6 +3,7 @@
 #define GPUFISH_GPU_H
 #include <array>
 #include <memory>
+#include <mutex>
 
 #include "gpu_defs.h"
 #include "nnue/network.h"
@@ -16,29 +17,16 @@ namespace Stockfish::GPU
     // Allocated on the host in pinned memory
     struct RegisterMachine
     {
-        void submit(Instruction instr)
-        {
-            uint32_t h = head;
-            uint32_t next = (h + 1) % InstructionQueueSize;
-            while (tail == next)
-            {
-                asm("pause");
-            }
+        void init();
+        void deinit();
 
-            // TODO block until there's space to submit
-            queue[h] = instr;
-            head = next;
-        }
+        void submit(Instruction instr);
+
+        void flush();
+        void blockUntilComplete();
+        bool ready() const;
 
         std::array<int16_t, L1Size> read_scratch(size_t index);
-
-        void blockUntilFinished() const
-        {
-            while (head != tail)
-            {
-                asm ("pause");
-            }
-        }
 
         template<Eval::NNUE::SIMD::UpdateOperation... ops,
                  std::enable_if_t<sizeof...(ops) == 0, bool> = true>
@@ -54,16 +42,21 @@ namespace Stockfish::GPU
             update_features<ops...>(reg, indices...);
         }
 
-        Instruction queue[InstructionQueueSize];
-        alignas(64) volatile uint32_t head;
-        alignas(64) volatile uint32_t tail;
+        bool isActive;
 
-        alignas(64) int32_t result[16];
+        void* stream;
+        Instruction queue[MaxInstructionsCount];
+        uint32_t queueIndex;
+
+        // Result is written here by GPU. So that we keep the transfer to 64 bytes, we repurpose
+        // result[i] == INT_MIN to mean "not (yet) written", and rely on 4-byte stores (at least) to
+        // be atomic.
+        alignas(64) volatile int32_t result[16];
 
         // Shared weights
         WeightsData *weights;
 
-        // device-side data pointer
+        // Device-side data pointer
         RegisterData *data;
     };
 
@@ -71,6 +64,7 @@ namespace Stockfish::GPU
     class CudaContext
     {
         void *stream = nullptr;
+        std::mutex streamCreationMtx;
 
     public:
         RegisterMachine *machines;

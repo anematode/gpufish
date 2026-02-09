@@ -214,6 +214,18 @@ void Search::Worker::start_searching() {
     accumulatorStack.reset(idx);
     refreshTable.assign_indices(idx);
 
+    accumulatorStack.machine = registerMachine;;
+    registerMachine->submit(GPU::Instruction::reset_reg(GPU::A));
+    for (auto& r : refreshTable.big.entries)
+    {
+        for (auto & ent : r)
+        {
+            registerMachine->submit(GPU::Instruction::store_scratch(ent.scratchIndex, GPU::A));
+        }
+    }
+
+    registerMachine->flush();
+
     // Non-main threads go directly to iterative_deepening()
     if (!is_mainthread())
     {
@@ -648,15 +660,6 @@ void Search::Worker::clear() {
         reductions[i] = int(2747 / 128.0 * std::log(i));
 
     refreshTable.clear(networks[numaAccessToken]);
-    registerMachine->submit(GPU::Instruction::reset_reg(GPU::A));
-    accumulatorStack.machine = registerMachine;;
-    for (auto& r : refreshTable.big.entries)
-    {
-        for (auto & ent : r)
-        {
-            registerMachine->submit(GPU::Instruction::store_scratch(ent.scratchIndex, GPU::A));
-        }
-    }
 }
 
 

@@ -8,10 +8,11 @@
 #include <cassert>
 #include <cstdint>
 #include <cstddef>
+#include <string>
 
 #define ScratchRegCount 2048
 #define L1Size 1024
-#define InstructionQueueSize 2048
+#define MaxInstructionsCount 256
 #define ThreadsPerWarp 32
 
 namespace Stockfish::GPU
@@ -60,6 +61,21 @@ namespace Stockfish::GPU
         static constexpr size_t RegIndexBits = 2;
         static constexpr size_t BucketBits = 3;
         static constexpr size_t MaxBucket = 8;
+
+        std::string to_string() const
+        {
+            std::string result = "";
+            switch (opcode())
+            {
+                case SwitchMachine: result = "SwitchMachine"; break;
+                case LdScratch: result = "LdScratch #" + std::to_string(decode_wide_index()); break;
+                case StScratch: result = "StScratch #" + std::to_string(decode_wide_index()); break;
+                case AddFeature: result = "AddFeature #" + std::to_string(decode_wide_index()); break;
+                case SubFeature: result = "SubFeature #" + std::to_string(decode_wide_index()); break;
+            default: result = "unknown"; break;
+            }
+            return result;
+        }
 
         static constexpr Instruction switch_to_machine(size_t index)
         {

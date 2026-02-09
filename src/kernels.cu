@@ -4,7 +4,6 @@
 #include <cstdio>
 #include <memory>
 
-#include "../../../../../usr/local/gcc-15.2.0/include/c++/15.2.0/bits/this_thread_sleep.h"
 #include "nnue/network.h"
 
 // Credit: https://stackoverflow.com/a/14038590
@@ -34,6 +33,11 @@ namespace Stockfish::GPU
     // Device-side data that lives only in GPU memory
     struct RegisterData
     {
+        // A sequence of instructions is read from here
+        Instruction instructions[MaxInstructionsCount];
+        // This flag gives the number of instructions written
+        volatile int instructionCount;
+
         ScratchReg regs[ScratchRegCount];
 
         __device__ int16_t *get_scratch(Instruction inst)
@@ -110,11 +114,14 @@ namespace Stockfish::GPU
         auto* transformer = machine->weights->transformer;
         auto* buckets = machine->weights->buckets;
 
+        Instruction* instructionBuffer = data->instructions;
+        volatile int* instructionCountPtr = &data->instructionCount;
+
         typedef unsigned reg_t[PtxRegsPerThreadSlice];
         reg_t regA, regB, regC, regD;
 
-        uint32_t tail = machine->tail;
         uint32_t myL1Offset = L1EntriesPerThreadSlice * lane_id;
+        uint32_t instructionCount = 0;
 
 #define SWITCH_REG(X) switch (inst.decode_reg()) { \
     case 0: { X(regA); break; } \
@@ -122,162 +129,232 @@ namespace Stockfish::GPU
     case 2: { X(regC); break; } \
     case 3: { X(regD); break; } \
     default: __builtin_unreachable(); \
-    };
+        };
+
+        __shared__ Instruction cmdBuffers[MaxInstructionsCount * 4];
+        Instruction* myCmdBuffer = &cmdBuffers[warp_id % 4];
 
         while (true) {
-            __shared__ Instruction current_cmd[256];
-            Instruction& inst = current_cmd[threadIdx.x / 32];
-
             // Warp leader polls the queue
             if (lane_id == 0) {
-                while (machine->head == tail)
+                while ((instructionCount = *instructionCountPtr) == 0)
                 {
-                    __nanosleep(50);
+                    __nanosleep(50);  // TODO better approach here?
                 }
-
-                // todo exit somehow lol
-                inst = machine->queue[tail];
+                *instructionCountPtr = 0;
             }
 
             uint32_t mask = __activemask();
-
-            switch (inst.opcode())
+            instructionCount = __shfl_sync(0xFFFFFFFF, instructionCount, 0);
+            // Copy instructions into shared memory
+            for (uint32_t i = lane_id; i < instructionCount; i += ThreadsPerWarp)
             {
-            case SwitchMachine:
-                break;
-            case Exit:
-                return;
-            case LdScratch: {
-                int16_t* scratch = data->get_scratch(inst);
-                SWITCH_REG([&] (reg_t r)
-                {
-                    memcpy(r, &scratch[myL1Offset], sizeof(reg_t));
-                })
-                break;
+                myCmdBuffer[i] = instructionBuffer[i];
             }
-            case StScratch: {
-                int16_t* scratch = data->get_scratch(inst);
-                SWITCH_REG([&] (reg_t r)
-                {
-                    memcpy(&scratch[myL1Offset], r, sizeof(reg_t));
-                })
-                break;
-            }
-            case AddFeature: {
-                uint32_t index = inst.decode_wide_index();
-                if (is_halfka_reg(inst.decode_reg()))
-                {
-                    const int16_t *weights = &transformer->weights[index * L1Size] + myL1Offset;
-                    SWITCH_REG([&] (reg_t r)
-                    {
-                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++) {
-                            unsigned val;
-                            memcpy(&val, &weights[2 * i], 4);
-                            r[i] = __vadd2(r[i], val);
-                        }
-                    })
-                } else {
-                    const int8_t *weights = &transformer->threatWeights[index * L1Size] + myL1Offset;
-                    SWITCH_REG(([&] (reg_t r)
-                    {
-                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 2) {
-                            unsigned val, l, h;
-                            memcpy(&val, &weights[4 * i], 4);
-                            cvt8_to_16(val, &l, &h);
-                            r[i] = __vadd2(r[i], l);
-                            r[i + 1] = __vadd2(r[i + 1], h);
-                        }
-                    }))
-                }
-                break;
-            }
-            case SubFeature:
+
+            for (uint32_t inst_i = 0; inst_i < instructionCount; ++inst_i)
             {
-                uint32_t index = inst.decode_wide_index();
-                if (is_halfka_reg(inst.decode_reg()))
+                const Instruction& inst = myCmdBuffer[inst_i];
+                switch (inst.opcode())
                 {
-                    const int16_t *weights = &transformer->weights[index * L1Size] + myL1Offset;
-                    SWITCH_REG([&] (reg_t r)
+                case SwitchMachine:
+                    break;
+                case Exit:
                     {
-                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++) {
-                            unsigned val;
-                            memcpy(&val, &weights[2 * i], 4);
-                            r[i] = __vsub2(r[i], val);
-                        }
-                    })
-                } else {
-                    const int8_t *weights = &transformer->threatWeights[index * L1Size] + myL1Offset;
-                    SWITCH_REG(([&] (reg_t r)
-                    {
-                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 2) {
-                            unsigned val, l, h;
-                            memcpy(&val, &weights[4 * i], 4);
-                            cvt8_to_16(val, &l, &h);
-                            r[i] = __vsub2(r[i], l);
-                            r[i + 1] = __vsub2(r[i + 1], h);
-                        }
-                    }))
-                }
-                break;
-            }
-            case Finalize: {
-                /*Eval::NNUE::L1Bucket* bucket = &buckets[inst.decode_bucket()];
-                int32_t data[16];
-
-                for (int i = 0; i < PtxRegsPerThreadSlice; i++)
-                {
-
-                }
-
-                #pragma unroll
-                for (int i = 0; i < 16; ++i) {
-                    for (int offset = 16; offset > 0; offset /= 2) {
-                        data[i] += __shfl_down_sync(0xFFFFFFFF, data[i], offset);
+                        machine->result[0] = 0;
+                        return;
                     }
-                }*/
-
-                machine->result[0] = 1;
-                __threadfence_system();
-                break;
-            }
-            case ResetReg: {
-                if (is_halfka_reg(inst.decode_reg()))
-                {
-                    SWITCH_REG([&] (reg_t r)
-                    {
-                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++)
+                case LdScratch: {
+                        int16_t* scratch = data->get_scratch(inst);
+                        SWITCH_REG([&] (reg_t r)
                         {
-                            uint32_t val;
-                            memcpy(&val, transformer->biases.data() + myL1Offset + 2 * i, 4);
-                            r[i] = val;
-                        }
-                    })
-                } else
-                {
-                    SWITCH_REG([&] (reg_t r)
-                    {
-                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++)
-                            r[i] = 0;
-                    })
+                            memcpy(r, &scratch[myL1Offset], sizeof(reg_t));
+                        })
+                        break;
                 }
+                case StScratch: {
+                        int16_t* scratch = data->get_scratch(inst);
+                        SWITCH_REG([&] (reg_t r)
+                        {
+                            memcpy(&scratch[myL1Offset], r, sizeof(reg_t));
+                        })
+                        break;
+                }
+                case AddFeature: {
+                        uint32_t index = inst.decode_wide_index();
+                        if (is_halfka_reg(inst.decode_reg()))
+                        {
+                            const int16_t *weights = &transformer->weights[index * L1Size] + myL1Offset;
+                            SWITCH_REG([&] (reg_t r)
+                            {
+                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++) {
+                                    unsigned val;
+                                    memcpy(&val, &weights[2 * i], 4);
+                                    r[i] = __vadd2(r[i], val);
+                                }
+                            })
+                        } else {
+                            const int8_t *weights = &transformer->threatWeights[index * L1Size] + myL1Offset;
+                            SWITCH_REG(([&] (reg_t r)
+                            {
+                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 2) {
+                                    unsigned val, l, h;
+                                    memcpy(&val, &weights[4 * i], 4);
+                                    cvt8_to_16(val, &l, &h);
+                                    r[i] = __vadd2(r[i], l);
+                                    r[i + 1] = __vadd2(r[i + 1], h);
+                                }
+                            }))
+                        }
+                        break;
+                }
+                case SubFeature:
+                    {
+                        uint32_t index = inst.decode_wide_index();
+                        if (is_halfka_reg(inst.decode_reg()))
+                        {
+                            const int16_t *weights = &transformer->weights[index * L1Size] + myL1Offset;
+                            SWITCH_REG([&] (reg_t r)
+                            {
+                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++) {
+                                    unsigned val;
+                                    memcpy(&val, &weights[2 * i], 4);
+                                    r[i] = __vsub2(r[i], val);
+                                }
+                            })
+                        } else {
+                            const int8_t *weights = &transformer->threatWeights[index * L1Size] + myL1Offset;
+                            SWITCH_REG(([&] (reg_t r)
+                            {
+                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 2) {
+                                    unsigned val, l, h;
+                                    memcpy(&val, &weights[4 * i], 4);
+                                    cvt8_to_16(val, &l, &h);
+                                    r[i] = __vsub2(r[i], l);
+                                    r[i + 1] = __vsub2(r[i + 1], h);
+                                }
+                            }))
+                        }
+                        break;
+                    }
+                case Finalize: {
+                        /*Eval::NNUE::L1Bucket* bucket = &buckets[inst.decode_bucket()];
+                        int32_t data[16];
 
-                break;
-            }
+                        for (int i = 0; i < PtxRegsPerThreadSlice; i++)
+                        {
+
+                        }
+
+                        #pragma unroll
+                        for (int i = 0; i < 16; ++i) {
+                            for (int offset = 16; offset > 0; offset /= 2) {
+                                data[i] += __shfl_down_sync(0xFFFFFFFF, data[i], offset);
+                            }
+                        }*/
+
+                        machine->result[0] = 1;
+                        break;
+                }
+                case ResetReg: {
+                        if (is_halfka_reg(inst.decode_reg()))
+                        {
+                            SWITCH_REG([&] (reg_t r)
+                            {
+                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++)
+                                {
+                                    uint32_t val;
+                                    memcpy(&val, transformer->biases.data() + myL1Offset + 2 * i, 4);
+                                    r[i] = val;
+                                }
+                            })
+                        } else
+                        {
+                            SWITCH_REG([&] (reg_t r)
+                            {
+                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++)
+                                    r[i] = 0;
+                            })
+                        }
+
+                        break;
+                }
+                }
             }
 
-            if (lane_id == 0) {
-                tail = (tail + 1) % InstructionQueueSize;
-                machine->tail = tail;
+            // Signal to the CPU that we're done with this batch
+            if (lane_id == 0)
+            {
+                machine->result[0] = 1;
             }
         }
+    }
+
+    void RegisterMachine::init()
+    {
+        cudaStreamCreate((cudaStream_t*) &stream);
+        checkError(cudaMalloc(&data, sizeof(RegisterData)));
+        checkError(cudaMemset(data, 0, sizeof(RegisterData)));
+    }
+
+    void RegisterMachine::deinit()
+    {
+        cudaStreamDestroy((cudaStream_t) stream);
+        cudaFree(data);
+        stream = nullptr;
+    }
+
+    void RegisterMachine::submit(Instruction instr)
+    {
+        if (!isActive)
+        {
+            fprintf(stderr, "RegisterMachine is inactive!\n");
+            abort();
+        }
+        if (queueIndex >= MaxInstructionsCount)
+        {
+            // Need an immediate flush before writing the next instruction
+            // Mainly used during setup
+            flush();
+            blockUntilComplete();
+        }
+        queue[queueIndex++] = instr;
+    }
+
+    void RegisterMachine::flush()
+    {
+        if (queueIndex == 0)
+            return;
+        std::fill_n(result, 16, INT_MIN);
+        checkError(
+            cudaMemcpyAsync(&data->instructions, queue, sizeof(Instruction) * queueIndex, cudaMemcpyHostToDevice, (cudaStream_t) stream)
+        );
+        // Signal that there are a nonzero number of instructions to consume
+        checkError(cudaMemcpyAsync((int*)&data->instructionCount, &queueIndex, sizeof(uint32_t), cudaMemcpyHostToDevice,
+                        (cudaStream_t)stream));
+    }
+
+    void RegisterMachine::blockUntilComplete()
+    {
+        while (!ready())  // TODO add a "perf counter" for this
+        {
+            asm("pause");
+        }
+
+        // TODO verify that all entries are written
+
+        queueIndex = 0;
+    }
+
+    bool RegisterMachine::ready() const
+    {
+        return result[0] != INT_MIN;
     }
 
     std::array<int16_t, 1024> RegisterMachine::read_scratch(size_t index)
     {
         std::array<int16_t, 1024> array;
-        printf("1");
         checkError(cudaMemcpy(&array, &data->regs[index], sizeof(array), cudaMemcpyDeviceToHost));
-        printf("2");
         return array;
     }
 
@@ -291,7 +368,7 @@ namespace Stockfish::GPU
         for (int i = 0; i < machineCount; i++) {
             RegisterMachine *machine = &machines[i];
 
-            checkError(cudaMalloc(&machine->data, sizeof(RegisterData)));
+            machine->init();
             machine->weights = weights.get();
         }
     }
@@ -300,17 +377,22 @@ namespace Stockfish::GPU
     {
         if (!stream)
             return;
+
         // Stop all machines
         for (size_t i = 0; i < machineCount; i++)
         {
             machines[i].submit(Instruction::stop());
+            machines[i].flush();
+            machines[i].blockUntilComplete();
+            machines[i].isActive = false;
         }
 
         cudaStreamSynchronize((cudaStream_t) stream);
+        cudaStreamDestroy((cudaStream_t) stream);
         stream = nullptr;
     }
 
-RegisterMachine* CudaContext::get_machine(size_t size)
+    RegisterMachine* CudaContext::get_machine(size_t size)
     {
         assert(size < machineCount);
         return &machines[size];
@@ -320,12 +402,9 @@ RegisterMachine* CudaContext::get_machine(size_t size)
     {
         stop_all();
 
-        if (stream)
-            cudaStreamDestroy((cudaStream_t) stream);
-        stream = nullptr;
-
         for (int i = 0; i < machineCount; i++)
         {
+            machines[i].deinit();
             cudaFreeHost(machines[i].data);
         }
         cudaFree(machines);
@@ -335,15 +414,18 @@ RegisterMachine* CudaContext::get_machine(size_t size)
     void CudaContext::launch_persistent_kernel()
     {
         if (stream)
-        {
-            std::cout << "Already created the kernel\n";
             return;
-        }
 
         checkError(cudaStreamCreate((cudaStream_t*) &stream));
 
-        int threads_per_block = 32;
-        int num_blocks = machineCount;
+        int num_warps = machineCount;
+        int threads_per_block = 128;
+        int num_blocks = (num_warps * 32 + threads_per_block - 1) / threads_per_block;
+
+        for (size_t i = 0; i < machineCount; i++)
+        {
+            machines[i].isActive = true;
+        }
 
         persistent_kernel<<<num_blocks, threads_per_block, 0, (cudaStream_t) stream>>>(machines, machineCount);
     }

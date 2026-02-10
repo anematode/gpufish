@@ -350,7 +350,6 @@ namespace Stockfish::GPU
             if (lane_id == 0)
             {
                 machine->result[0] = 1;
-                __threadfence_system();
             }
         }
     }
@@ -404,6 +403,7 @@ namespace Stockfish::GPU
         int attempts = 0;
         while (!ready())  // TODO add a "perf counter" for this
         {
+            asm("clflush %0" :: "m"(result[0]));
             asm("pause");
             if (attempts++ >= 1000000)
             {

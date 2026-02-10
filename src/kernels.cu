@@ -133,6 +133,22 @@ namespace Stockfish::GPU
             return;
         case Store:
             assert(false);
+#if 0
+        case Add:
+            i1 = __dp4a(i, 0x1, i1);
+            i2 = __dp4a(i, 0x1 << 8, i2);
+            i3 = __dp4a(i, 0x1 << 16, i3);
+            i4 = __dp4a(i, 0x1 << 24, i4);
+            return;
+        case Sub:
+            i1 = __dp4a(i, 0xff, i1);
+            i2 = __dp4a(i, 0xff << 8, i2);
+            i3 = __dp4a(i, 0xff << 16, i3);
+            i4 = __dp4a(i, 0xff << 24, i4);
+            return;
+        case Store:
+            assert(false);
+#endif
         }
     }
 
@@ -155,11 +171,15 @@ namespace Stockfish::GPU
         auto* transformer = machine->weights->transformer;
         auto* buckets = machine->weights->buckets;
 
-
         typedef int reg_t[PtxRegsPerThreadSlice];
         reg_t regA, regB, regC, regD;
 
-        uint32_t myL1Offset = L1EntriesPerThreadSlice * lane_id;
+        uint32_t myL1Offset = 8 * lane_id;
+        constexpr uint32_t vectorLoadStride = 8 * ThreadsPerWarp;
+
+        // To achieve good memory coalescing patterns, we implement the following indexing:
+        // reg[i:i+7] = weights[myL1Offset+PtxRegsPerThreadSize/8*i:myL1Offset+PtxRegsPerThreadSize/8*i+7]
+
         uint32_t instructionCount = 0, signal = 0;
 
 #define SWITCH_REG(X) switch (inst.decode_reg()) { \
@@ -211,16 +231,16 @@ namespace Stockfish::GPU
                         return;
                     }
                 case LdScratch: {
-                        int16_t* scratch = data->get_scratch(inst) + myL1Offset;
+                        int16_t* scratch = data->get_scratch(inst);
                         SWITCH_REG([&] (reg_t r)
                         {
-                            _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 8)
+                            _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, ++j)
                             {
                                 int4 data = *(int4*)&scratch[i];
-                                unpack16_to_32(data.w, r[i], r[i + 1], Store);
-                                unpack16_to_32(data.x, r[i + 2], r[i + 3], Store);
-                                unpack16_to_32(data.y, r[i + 4], r[i + 5], Store);
-                                unpack16_to_32(data.z, r[i + 6], r[i + 7], Store);
+                                unpack16_to_32(data.w, r[j], r[j + 1], Store);
+                                unpack16_to_32(data.x, r[j + 2], r[j + 3], Store);
+                                unpack16_to_32(data.y, r[j + 4], r[j + 5], Store);
+                                unpack16_to_32(data.z, r[j + 6], r[j + 7], Store);
                             }
                         })
                         break;
@@ -229,13 +249,13 @@ namespace Stockfish::GPU
                         int16_t* scratch = data->get_scratch(inst);
                         SWITCH_REG([&] (reg_t r)
                         {
-                            _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 8)
+                            _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, ++j)
                             {
                                 int4 result;
-                                pack16(r[i], r[i+1], result.w);
-                                pack16(r[i+2], r[i+3], result.x);
-                                pack16(r[i+4], r[i+5], result.y);
-                                pack16(r[i+6], r[i+7], result.z);
+                                pack16(r[j], r[j+1], result.w);
+                                pack16(r[j+2], r[j+3], result.x);
+                                pack16(r[j+4], r[j+5], result.y);
+                                pack16(r[j+6], r[j+7], result.z);
                                 *(int4*)&scratch[myL1Offset + i] = result;
                             }
                         })
@@ -245,27 +265,25 @@ namespace Stockfish::GPU
                         uint32_t index = inst.decode_wide_index();
                         if (is_halfka_reg(inst.decode_reg()))
                         {
-                            const int16_t *weights = &transformer->weights[index * L1Size] + myL1Offset;
+                            const int16_t *weights = &transformer->weights[index * L1Size];
                             SWITCH_REG([&] (reg_t r)
                             {
-                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 8) {
+                                _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, ++j) {
                                     int4 data = *(int4*)&weights[i];
-                                    unpack16_to_32(data.w, r[i], r[i + 1], Add);
-                                    unpack16_to_32(data.x, r[i + 2], r[i + 3], Add);
-                                    unpack16_to_32(data.y, r[i + 4], r[i + 5], Add);
-                                    unpack16_to_32(data.z, r[i + 6], r[i + 7], Add);
+                                    unpack16_to_32(data.w, r[j], r[j + 1], Add);
+                                    unpack16_to_32(data.x, r[j + 2], r[j + 3], Add);
+                                    unpack16_to_32(data.y, r[j + 4], r[j + 5], Add);
+                                    unpack16_to_32(data.z, r[j + 6], r[j + 7], Add);
                                 }
                             })
                         } else {
-                            const int8_t *weights = &transformer->threatWeights[index * L1Size] + myL1Offset;
+                            const int8_t *weights = &transformer->threatWeights[index * L1Size];
                             SWITCH_REG(([&] (reg_t r)
                             {
-                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 16) {
-                                    int4 data = *(int4*)&weights[i];
-                                    unpack8_to_32(data.w, r[i], r[i + 1], r[i + 2], r[i + 3], Add);
-                                    unpack8_to_32(data.x, r[i + 4], r[i + 5], r[i + 6], r[i + 7], Add);
-                                    unpack8_to_32(data.y, r[i + 8], r[i + 9], r[i + 10], r[i + 11], Add);
-                                    unpack8_to_32(data.z, r[i + 12], r[i + 13], r[i + 14], r[i + 15], Add);
+                                _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, ++j) {
+                                    int2 data = *(int2*)&weights[i];
+                                    unpack8_to_32(data.x, r[j], r[j + 1], r[j + 2], r[j + 3], Add);
+                                    unpack8_to_32(data.y, r[j + 4], r[j + 5], r[j + 6], r[j + 7], Add);
                                 }
                             }))
                         }
@@ -276,27 +294,25 @@ namespace Stockfish::GPU
                         uint32_t index = inst.decode_wide_index();
                         if (is_halfka_reg(inst.decode_reg()))
                         {
-                            const int16_t *weights = &transformer->weights[index * L1Size] + myL1Offset;
+                            const int16_t *weights = &transformer->weights[index * L1Size];
                             SWITCH_REG([&] (reg_t r)
                             {
-                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 8) {
+                                _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, ++j) {
                                     int4 data = *(int4*)&weights[i];
-                                    unpack16_to_32(data.w, r[i], r[i + 1], Sub);
-                                    unpack16_to_32(data.x, r[i + 2], r[i + 3], Sub);
-                                    unpack16_to_32(data.y, r[i + 4], r[i + 5], Sub);
-                                    unpack16_to_32(data.z, r[i + 6], r[i + 7], Sub);
+                                    unpack16_to_32(data.w, r[j], r[j + 1], Sub);
+                                    unpack16_to_32(data.x, r[j + 2], r[j + 3], Sub);
+                                    unpack16_to_32(data.y, r[j + 4], r[j + 5], Sub);
+                                    unpack16_to_32(data.z, r[j + 6], r[j + 7], Sub);
                                 }
                             })
                         } else {
-                            const int8_t *weights = &transformer->threatWeights[index * L1Size] + myL1Offset;
+                            const int8_t *weights = &transformer->threatWeights[index * L1Size];
                             SWITCH_REG(([&] (reg_t r)
                             {
-                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 16) {
-                                    int4 data = *(int4*)&weights[i];
-                                    unpack8_to_32(data.w, r[i], r[i + 1], r[i + 2], r[i + 3], Sub);
-                                    unpack8_to_32(data.x, r[i + 4], r[i + 5], r[i + 6], r[i + 7], Sub);
-                                    unpack8_to_32(data.y, r[i + 8], r[i + 9], r[i + 10], r[i + 11], Sub);
-                                    unpack8_to_32(data.z, r[i + 12], r[i + 13], r[i + 14], r[i + 15], Sub);
+                                _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, ++j) {
+                                    int2 data = *(int2*)&weights[i];
+                                    unpack8_to_32(data.x, r[j], r[j + 1], r[j + 2], r[j + 3], Sub);
+                                    unpack8_to_32(data.y, r[j + 4], r[j + 5], r[j + 6], r[j + 7], Sub);
                                 }
                             }))
                         }
@@ -327,9 +343,13 @@ namespace Stockfish::GPU
                         {
                             SWITCH_REG([&] (reg_t r)
                             {
-                                _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++)
+                                _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, ++j)
                                 {
-                                    r[i] = transformer->biases.data()[myL1Offset + i];
+                                    int4 data = *(int4*)&transformer->biases.data()[i];
+                                    unpack16_to_32(data.w, r[j], r[j + 1], Store);
+                                    unpack16_to_32(data.x, r[j + 2], r[j + 3], Store);
+                                    unpack16_to_32(data.y, r[j + 4], r[j + 5], Store);
+                                    unpack16_to_32(data.z, r[j + 6], r[j + 7], Store);
                                 }
                             })
                         } else

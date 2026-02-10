@@ -216,7 +216,7 @@ namespace Stockfish::GPU
                         {
                             _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 8)
                             {
-                                int4 data = *(int4*)&scratch[myL1Offset + i];
+                                int4 data = *(int4*)&scratch[i];
                                 unpack16_to_32(data.w, r[i], r[i + 1], Store);
                                 unpack16_to_32(data.x, r[i + 2], r[i + 3], Store);
                                 unpack16_to_32(data.y, r[i + 4], r[i + 5], Store);
@@ -249,7 +249,7 @@ namespace Stockfish::GPU
                             SWITCH_REG([&] (reg_t r)
                             {
                                 _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 8) {
-                                    int4 data = *(int4*)&weights[myL1Offset + i];
+                                    int4 data = *(int4*)&weights[i];
                                     unpack16_to_32(data.w, r[i], r[i + 1], Add);
                                     unpack16_to_32(data.x, r[i + 2], r[i + 3], Add);
                                     unpack16_to_32(data.y, r[i + 4], r[i + 5], Add);
@@ -261,7 +261,7 @@ namespace Stockfish::GPU
                             SWITCH_REG(([&] (reg_t r)
                             {
                                 _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 16) {
-                                    int4 data = *(int4*)&weights[myL1Offset + i];
+                                    int4 data = *(int4*)&weights[i];
                                     unpack8_to_32(data.w, r[i], r[i + 1], r[i + 2], r[i + 3], Add);
                                     unpack8_to_32(data.x, r[i + 4], r[i + 5], r[i + 6], r[i + 7], Add);
                                     unpack8_to_32(data.y, r[i + 8], r[i + 9], r[i + 10], r[i + 11], Add);
@@ -280,7 +280,7 @@ namespace Stockfish::GPU
                             SWITCH_REG([&] (reg_t r)
                             {
                                 _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 8) {
-                                    int4 data = *(int4*)&weights[myL1Offset + i];
+                                    int4 data = *(int4*)&weights[i];
                                     unpack16_to_32(data.w, r[i], r[i + 1], Sub);
                                     unpack16_to_32(data.x, r[i + 2], r[i + 3], Sub);
                                     unpack16_to_32(data.y, r[i + 4], r[i + 5], Sub);
@@ -292,7 +292,7 @@ namespace Stockfish::GPU
                             SWITCH_REG(([&] (reg_t r)
                             {
                                 _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i += 16) {
-                                    int4 data = *(int4*)&weights[myL1Offset + i];
+                                    int4 data = *(int4*)&weights[i];
                                     unpack8_to_32(data.w, r[i], r[i + 1], r[i + 2], r[i + 3], Sub);
                                     unpack8_to_32(data.x, r[i + 4], r[i + 5], r[i + 6], r[i + 7], Sub);
                                     unpack8_to_32(data.y, r[i + 8], r[i + 9], r[i + 10], r[i + 11], Sub);
@@ -384,6 +384,14 @@ namespace Stockfish::GPU
             flush();
             blockUntilComplete();
         }
+        if (instr.opcode() == LdScratch && staging.instructionCount > 0)
+        {
+            const auto& prev = staging.list[staging.instructionCount - 1];
+            if (prev.opcode() == StScratch && prev.decode_wide_index() == instr.decode_wide_index() && prev.decode_reg() == instr.decode_reg())
+            {
+                return;
+            }
+        }
         staging.list[staging.instructionCount++] = instr;
     }
 
@@ -405,7 +413,7 @@ namespace Stockfish::GPU
         {
             asm("clflush %0" :: "m"(result[0]));
             asm("pause");
-            if (attempts++ >= 1000000)
+            /*if (attempts++ >= 1000000)
             {
                 std::cout << "Register machine at " << this << " failed to read the result in time!\n";
                 for (int i = 0; i < staging.instructionCount; i++)
@@ -413,7 +421,7 @@ namespace Stockfish::GPU
                     std::cout << "Instruction " << i << " " << staging.list[i].to_string() << "\n";
                 }
                 abort();
-            }
+            }*/
         }
 
         staging.instructionCount = 0;

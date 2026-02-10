@@ -12,7 +12,7 @@
 
 #define ScratchRegCount 2048
 #define L1Size 1024
-#define MaxInstructionsCount 512
+#define MaxInstructionsCount 128
 #define ThreadsPerWarp 32
 
 namespace Stockfish::GPU
@@ -72,7 +72,8 @@ namespace Stockfish::GPU
                 case StScratch: result = "StScratch #" + std::to_string(decode_wide_index()); break;
                 case AddFeature: result = "AddFeature #" + std::to_string(decode_wide_index()); break;
                 case SubFeature: result = "SubFeature #" + std::to_string(decode_wide_index()); break;
-            default: result = "unknown"; break;
+                case Exit: result = "Exit"; break;
+                default: result = "unknown"; break;
             }
             return result;
         }

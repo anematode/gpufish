@@ -141,7 +141,7 @@ namespace Stockfish::GPU
         out = (i1 & 0xffff) + (unsigned(i2) << 16);
     }
 
-    __global__ void persistent_kernel(RegisterMachine* machines, int num_machines) {
+    __global__ void persistent_kernel(RegisterMachine* machines, WCInstructionBuffer* buffers, int num_machines) {
         unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
         unsigned lane_id = threadIdx.x % ThreadsPerWarp;
 
@@ -149,18 +149,18 @@ namespace Stockfish::GPU
         if (warp_id >= num_machines) return;
 
         RegisterMachine *machine = &machines[warp_id];
+        WCInstructionBuffer* instructionBuffer = &buffers[warp_id];
+
         RegisterData *data = machine->data;
         auto* transformer = machine->weights->transformer;
         auto* buckets = machine->weights->buckets;
 
-        Instruction* instructionBuffer = machine->queue;
-        auto* instructionCountPtr = &machine->instructionCount;
 
         typedef int reg_t[PtxRegsPerThreadSlice];
         reg_t regA, regB, regC, regD;
 
         uint32_t myL1Offset = L1EntriesPerThreadSlice * lane_id;
-        uint32_t instructionCount = 0;
+        uint32_t instructionCount = 0, signal = 0;
 
 #define SWITCH_REG(X) switch (inst.decode_reg()) { \
     case 0: { X(regA); break; } \
@@ -176,18 +176,23 @@ namespace Stockfish::GPU
         while (true) {
             // Warp leader polls the queue
             if (lane_id == 0) {
-                while ((instructionCount = *instructionCountPtr) == 0)
+                uint32_t temp;
+                while ((temp = *(volatile uint32_t*)&instructionBuffer->data) == signal)
                 {
                     __nanosleep(50);  // TODO better approach here?
                 }
+                signal = temp;
+                instructionCount = signal & 0xffff;
             }
 
             instructionCount = __shfl_sync(0xFFFFFFFF, instructionCount, 0);
             // Copy instructions into shared memory
             for (uint32_t i = lane_id; i < instructionCount; i += ThreadsPerWarp)
             {
-                myCmdBuffer[i] = instructionBuffer[i];
+                myCmdBuffer[i] = Instruction { *(volatile uint32_t*)&instructionBuffer->list[i] };
             }
+
+            uint32_t mask = __activemask();
 
             for (uint32_t inst_i = 0; inst_i < instructionCount; ++inst_i)
             {
@@ -198,7 +203,11 @@ namespace Stockfish::GPU
                     break;
                 case Exit:
                     {
-                        machine->result[0] = 0;
+                        if (lane_id == 0)
+                        {
+                            machine->result[0] = 0;
+                            __threadfence_system();
+                        }
                         return;
                     }
                 case LdScratch: {
@@ -340,8 +349,8 @@ namespace Stockfish::GPU
             // Signal to the CPU that we're done with this batch
             if (lane_id == 0)
             {
-                *instructionCountPtr = 0;
                 machine->result[0] = 1;
+                __threadfence_system();
             }
         }
     }
@@ -357,6 +366,8 @@ namespace Stockfish::GPU
     {
         cudaStreamDestroy((cudaStream_t) stream);
         cudaFree(data);
+        data = nullptr;
+        wcBuffer = nullptr;
         stream = nullptr;
     }
 
@@ -367,47 +378,56 @@ namespace Stockfish::GPU
             fprintf(stderr, "RegisterMachine is inactive!\n");
             abort();
         }
-        if (queueIndex >= MaxInstructionsCount)
+        if (staging.instructionCount >= MaxInstructionsCount)
         {
             // Need an immediate flush before writing the next instruction
             // Mainly used during setup
             flush();
             blockUntilComplete();
-            std::cerr << "Blocked!!\n";
         }
-        queue[queueIndex++] = instr;
+        staging.list[staging.instructionCount++] = instr;
     }
 
     void RegisterMachine::flush()
     {
-        if (queueIndex == 0)
+        if (staging.instructionCount == 0)
+        {
+            result[0] = 0;  // prevent accidentally waiting
             return;
+        }
         std::fill_n(result, 16, INT_MIN);
-        instructionCount = queueIndex;
-        start = __rdtsc();
+        staging.flush(wcBuffer);
     }
 
     void RegisterMachine::blockUntilComplete()
     {
-        // unsigned _;
-        // uint64_t goose = __rdtscp(&_);
+        int attempts = 0;
         while (!ready())  // TODO add a "perf counter" for this
         {
             asm("pause");
+            if (attempts++ >= 1000000)
+            {
+                std::cout << "Register machine at " << this << " failed to read the result in time!\n";
+                for (int i = 0; i < staging.instructionCount; i++)
+                {
+                    std::cout << "Instruction " << i << " " << staging.list[i].to_string() << "\n";
+                }
+                abort();
+            }
         }
+
+        staging.instructionCount = 0;
 
         // TODO verify that all entries are written
 
         // dbg_mean_of(__rdtscp(&_) - start, 1);
         // dbg_mean_of(goose - start, 2);
         // dbg_mean_of(__rdtscp(&_) - goose, 3);
-        queueIndex = 0;
-        instructionCount = 0;
     }
 
     bool RegisterMachine::ready() const
     {
-        return result[0] != INT_MIN || instructionCount == 0;
+        return result[0] != INT_MIN;
     }
 
     std::array<int16_t, 1024> RegisterMachine::read_scratch(size_t index)
@@ -422,13 +442,18 @@ namespace Stockfish::GPU
         checkError(
             cudaHostAlloc(&machines, machineCount * sizeof(RegisterMachine), cudaHostAllocMapped)
         );
+        checkError(
+            cudaHostAlloc(&wcBuffers, machineCount * sizeof(WCInstructionBuffer), cudaHostAllocMapped | cudaHostAllocWriteCombined)
+        );
 
         memset(machines, 0, machineCount * sizeof(RegisterMachine));
+        memset(wcBuffers, 0, machineCount * sizeof(WCInstructionBuffer));
         for (int i = 0; i < machineCount; i++) {
             RegisterMachine *machine = &machines[i];
 
             machine->init();
             machine->weights = weights.get();
+            machine->wcBuffer = &wcBuffers[i];
         }
     }
 
@@ -440,6 +465,7 @@ namespace Stockfish::GPU
         // Stop all machines
         for (size_t i = 0; i < machineCount; i++)
         {
+            machines[i].blockUntilComplete();
             machines[i].submit(Instruction::stop());
             machines[i].flush();
             machines[i].blockUntilComplete();
@@ -466,8 +492,10 @@ namespace Stockfish::GPU
             machines[i].deinit();
             cudaFreeHost(machines[i].data);
         }
+        cudaFreeHost(wcBuffers);
         cudaFree(machines);
         machines = nullptr;
+        wcBuffers = nullptr;
     }
 
     void CudaContext::launch_persistent_kernel()
@@ -476,6 +504,7 @@ namespace Stockfish::GPU
             return;
 
         checkError(cudaStreamCreate((cudaStream_t*) &stream));
+        memset(wcBuffers, 0, machineCount * sizeof(WCInstructionBuffer));
 
         int num_warps = machineCount;
         int threads_per_block = 128;
@@ -486,7 +515,7 @@ namespace Stockfish::GPU
             machines[i].isActive = true;
         }
 
-        persistent_kernel<<<num_blocks, threads_per_block, 0, (cudaStream_t) stream>>>(machines, machineCount);
+        persistent_kernel<<<num_blocks, threads_per_block, 0, (cudaStream_t) stream>>>(machines, wcBuffers, machineCount);
     }
 
     std::unique_ptr<CudaContext> make_context(const Eval::NNUE::NetworkBig& networks, size_t machine_count)

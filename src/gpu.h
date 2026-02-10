@@ -14,6 +14,50 @@ namespace Stockfish::GPU
     struct WeightsData;
     struct RegisterData;
 
+    // May be allocated in pinned host WC memory; instructions are copied here from the staging buffer. The GPU
+    // polls the instructionCount to know when to start stepping. The instruction count should always be
+    // written last (and technically with a store fence, but we're just using volatile and TSO for now).
+    struct alignas(64) WCInstructionBuffer
+    {
+        union
+        {
+            struct
+            {
+                uint16_t instructionCount;
+                uint16_t id;
+            };
+            uint32_t data;
+        };
+        Instruction list[MaxInstructionsCount];
+        char padding[64];
+
+        void flush(WCInstructionBuffer* to)
+        {
+            id++;
+
+            uint32_t count = instructionCount;
+            constexpr bool UseMovdir64B = false;
+            if constexpr (UseMovdir64B)
+            {
+                char* dest = reinterpret_cast<char*>(to);
+                const char* src = reinterpret_cast<char*>(this);
+
+                // We need to copy this many lines in reverse
+                ptrdiff_t lines = (count * sizeof(Instruction) + sizeof(instructionCount) + 63) / 64;
+                for (ptrdiff_t j = lines - 1; j >= 0; --j)
+                {
+                    asm ("movdir64b %1, %0" :: "r"(dest + 64 * j), "m"(src[64 * j]) : "memory");
+                }
+            } else
+            {
+                memcpy(&to->list, list, sizeof(Instruction) * count);
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+                memcpy(&to->data, &data, 4);
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+            }
+        }
+    };
+
     // Allocated on the host in pinned memory
     struct RegisterMachine
     {
@@ -45,12 +89,11 @@ namespace Stockfish::GPU
         bool isActive;
 
         void* stream;
-        uint32_t queueIndex;
 
         uint64_t start;
 
-        alignas(64) volatile uint32_t instructionCount;
-        Instruction queue[MaxInstructionsCount];
+        WCInstructionBuffer* wcBuffer;
+        WCInstructionBuffer staging;
 
         // Result is written here by GPU. So that we keep the transfer to 64 bytes, we repurpose
         // result[i] == INT_MIN to mean "not (yet) written", and rely on 4-byte stores (at least) to
@@ -72,6 +115,7 @@ namespace Stockfish::GPU
 
     public:
         RegisterMachine *machines;
+        WCInstructionBuffer* wcBuffers;
         size_t machineCount;
         std::unique_ptr<WeightsData> weights;
 

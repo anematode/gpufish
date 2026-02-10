@@ -12,7 +12,7 @@
 
 #define ScratchRegCount 2048
 #define L1Size 1024
-#define MaxInstructionsCount 256
+#define MaxInstructionsCount 512
 #define ThreadsPerWarp 32
 
 namespace Stockfish::GPU

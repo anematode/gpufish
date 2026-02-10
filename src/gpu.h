@@ -47,6 +47,8 @@ namespace Stockfish::GPU
         void* stream;
         uint32_t queueIndex;
 
+        uint64_t start;
+
         alignas(64) volatile uint32_t instructionCount;
         Instruction queue[MaxInstructionsCount];
 

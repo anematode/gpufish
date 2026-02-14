@@ -209,7 +209,7 @@ namespace Stockfish::GPU
             // Copy instructions into shared memory
             for (uint32_t i = lane_id; i < instructionCount; i += ThreadsPerWarp)
             {
-                myCmdBuffer[i] = Instruction { *(volatile uint32_t*)&instructionBuffer->list[i] };
+                myCmdBuffer[i] = Instruction { instructionBuffer->list[i] };
             }
 
             uint32_t mask = __activemask();
@@ -319,27 +319,47 @@ namespace Stockfish::GPU
                         break;
                     }
                 case Finalize: {
-                        // First compute pairwise multiplication values, storing into shared
-                        // memory for this warp
+                        // First compute pairwise multiplication values
+                        unsigned packed[L1EntriesPerThreadSlice / 4];
 
-
+#pragma unroll
+                        for (int p = 0; p < 2; ++p) {
+                            int32_t *src1 = p ? regC : regA;
+                            int32_t *src2 = p ? regB : regD;
+                            int offset = p + (L1EntriesPerThreadSlice / 8);
+#pragma unroll
+                            for (int i = 0; i < L1EntriesPerThreadSlice / 2; ++i) {
+                                int sum0 = std::clamp(int16_t(src1[i] + src1[i + 16]), int16_t(0), int16_t(255));
+                                int sum1 = std::clamp(int16_t(src2[i] + src2[i + 16]), int16_t(0), int16_t(255));
+                                int shamt = (i % 4) * 8;
+                                packed[offset + i / 4] &= ~(0xff << shamt);
+                                packed[offset + i / 4] |= ((sum0 * sum1) / 512) << shamt;
+                            }
+                        }
                         
-                        /*Eval::NNUE::L1Bucket* bucket = &buckets[inst.decode_bucket()];
-                        int32_t data[16];
+                        Eval::NNUE::L1Bucket* bucket = &buckets[inst.decode_bucket()];
+                        unsigned accumulation = bucket->biases[threadIdx.x % 16];
 
-                        for (int i = 0; i < PtxRegsPerThreadSlice; i++)
+#pragma unroll
+                        for (int j = 0, q = threadIdx.x >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
                         {
+                            for (int th_i = 0; th_i < ThreadsPerWarp; ++th_i, q += 2)
+                            {
+                                unsigned b1 = __shfl_sync(0xFFFFFFFF, packed[j], th_i);
+                                unsigned b2 = __shfl_sync(0xFFFFFFFF, packed[j + 1], th_i);
 
+                                unsigned selected = threadIdx.x < 16 ? b1 : b2;
+                                if (selected)
+                                {
+                                    accumulation = __dp4a(selected, *((unsigned*)bucket->weights[64 * q] + (threadIdx.x % 16)), accumulation);
+                                }
+                            }
                         }
 
-                        #pragma unroll
-                        for (int i = 0; i < 16; ++i) {
-                            for (int offset = 16; offset > 0; offset /= 2) {
-                                data[i] += __shfl_down_sync(0xFFFFFFFF, data[i], offset);
-                            }
-                        }*/
+                        accumulation += __shfl_down_sync(0xFFFFFFFF, accumulation, 16);
 
-                        machine->result[0] = 1;
+                        if (threadIdx.x < 16)
+                            machine->result[threadIdx.x] = int(accumulation);
                         break;
                 }
                 case ResetReg: {

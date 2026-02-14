@@ -319,6 +319,11 @@ namespace Stockfish::GPU
                         break;
                     }
                 case Finalize: {
+                        // First compute pairwise multiplication values, storing into shared
+                        // memory for this warp
+
+
+                        
                         /*Eval::NNUE::L1Bucket* bucket = &buckets[inst.decode_bucket()];
                         int32_t data[16];
 

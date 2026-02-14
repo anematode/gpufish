@@ -336,9 +336,18 @@ namespace Stockfish::GPU
                                 packed[offset + i / 4] |= ((sum0 * sum1) / 512) << shamt;
                             }
                         }
+
+                        if (inst.side_to_move())
+                        {
+#pragma unroll
+                            for (int i = 0; i < L1EntriesPerThreadSlice / 8; ++i)
+                            {
+                                std::swap(packed[i], packed[i + L1EntriesPerThreadSlice / 8]);
+                            }
+                        }
                         
                         Eval::NNUE::L1Bucket* bucket = &buckets[inst.decode_bucket()];
-                        unsigned accumulation = bucket->biases[threadIdx.x % 16];
+                        unsigned accumulation = threadIdx.x < 16 ? bucket->biases[threadIdx.x % 16] : 0;
 
 #pragma unroll
                         for (int j = 0, q = threadIdx.x >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
@@ -351,7 +360,7 @@ namespace Stockfish::GPU
                                 unsigned selected = threadIdx.x < 16 ? b1 : b2;
                                 if (selected)
                                 {
-                                    accumulation = __dp4a(selected, *((unsigned*)bucket->weights[64 * q] + (threadIdx.x % 16)), accumulation);
+                                    accumulation = __dp4a(selected, *((unsigned*)&bucket->weights[64 * q] + (threadIdx.x % 16)), accumulation);
                                 }
                             }
                         }

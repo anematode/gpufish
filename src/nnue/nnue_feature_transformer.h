@@ -105,6 +105,7 @@ class FeatureTransformer {
     // be permuted so that calling packus on adjacent vectors of 16-bit
     // integers loaded from the data results in the pre-permutation order
     static constexpr auto PackusEpi16Order = []() -> std::array<std::size_t, 8> {
+        return {0, 2, 4, 6, 1, 3, 5, 7};
 #if defined(USE_AVX512)
         // _mm512_packus_epi16 after permutation:
         // |   0   |   2   |   4   |   6   | // Vector 0

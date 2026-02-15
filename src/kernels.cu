@@ -52,14 +52,15 @@ namespace Stockfish::GPU
 
         WeightsData(const Eval::NNUE::NetworkBig &big)
         {
+            std::cout << "Constructing a WeightsData!\n";
             const Eval::NNUE::BigFeatureTransformer& transformer = big.get_ft();
             auto sparse_input_buckets = big.get_input_buckets();
 
             auto temp = std::make_unique<Eval::NNUE::BigFeatureTransformer>(transformer);
-            temp->unpermute_weights();
+            //temp->unpermute_weights();
 
-            checkError(cudaMalloc(&this->transformer, sizeof(transformer)));
-            checkError(cudaMemcpy(this->transformer, &*temp, sizeof(transformer), cudaMemcpyHostToDevice));
+            checkError(cudaMalloc(&this->transformer, sizeof(*temp)));
+            checkError(cudaMemcpy(this->transformer, &*temp, sizeof(*temp), cudaMemcpyHostToDevice));
 
             size_t bc = sparse_input_buckets.size();
             checkError(cudaMalloc(&buckets, sizeof(*sparse_input_buckets[0]) * bc));
@@ -102,15 +103,15 @@ namespace Stockfish::GPU
         switch (op)
         {
         case Add:
-            i1 += i; // we only care about the low 16 bits
+            i1 += i & 0xffff; // we only care about the low 16 bits
             i2 += (i >> 16);
             return;
         case Sub:
-            i1 -= i; // we only care about the low 16 bits
+            i1 -= i & 0xffff; // we only care about the low 16 bits
             i2 -= (i >> 16);
             return;
         case Store:
-            i1 = i;
+            i1 = i & 0xffff;
             i2 = i >> 16;
         }
     }
@@ -205,6 +206,7 @@ namespace Stockfish::GPU
                 instructionCount = signal & 0xffff;
             }
 
+            __syncwarp();
             instructionCount = __shfl_sync(0xFFFFFFFF, instructionCount, 0);
 
             // Copy instructions into shared memory
@@ -213,10 +215,10 @@ namespace Stockfish::GPU
                 myCmdBuffer[i] = instructionBuffer->list[i];
             }
 
-            __syncwarp();
-
             for (uint32_t inst_i = 0; inst_i < instructionCount; ++inst_i)
             {
+                __syncwarp();
+
                 const Instruction& inst = myCmdBuffer[inst_i];
                 switch (inst.opcode())
                 {
@@ -260,6 +262,7 @@ namespace Stockfish::GPU
                                 *(int4*)&scratch[i] = result;
                             }
                         })
+
                         break;
                 }
                 case AddFeature: {
@@ -410,6 +413,7 @@ namespace Stockfish::GPU
             }
 
             done:;
+            __syncwarp();
         }
     }
 
@@ -431,6 +435,7 @@ namespace Stockfish::GPU
 
     void RegisterMachine::submit(Instruction instr)
     {
+        std::cout << "Instr: " << instr.to_string() << std::endl;
         if (!isActive)
         {
             fprintf(stderr, "RegisterMachine is inactive!\n");
@@ -499,6 +504,7 @@ namespace Stockfish::GPU
 
     std::array<int16_t, 1024> RegisterMachine::read_scratch(size_t index)
     {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
         std::array<int16_t, 1024> array;
         std::fill(array.begin(), array.end(), 5);
         cudaStream_t stream;

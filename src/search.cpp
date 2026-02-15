@@ -214,7 +214,7 @@ void Search::Worker::start_searching() {
     accumulatorStack.reset(idx);
     refreshTable.assign_indices(idx);
 
-    accumulatorStack.machine = registerMachine;;
+    accumulatorStack.machine = registerMachine;
     registerMachine->submit(GPU::Instruction::reset_reg(GPU::A));
     for (auto& r : refreshTable.big.entries)
     {
@@ -223,8 +223,6 @@ void Search::Worker::start_searching() {
             registerMachine->submit(GPU::Instruction::store_scratch(ent.scratchIndex, GPU::A));
         }
     }
-
-    registerMachine->flush();
 
     // Non-main threads go directly to iterative_deepening()
     if (!is_mainthread())

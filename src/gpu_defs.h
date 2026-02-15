@@ -68,10 +68,11 @@ namespace Stockfish::GPU
             switch (opcode())
             {
                 case SwitchMachine: result = "SwitchMachine"; break;
-                case LdScratch: result = "LdScratch #" + std::to_string(decode_wide_index()); break;
-                case StScratch: result = "StScratch #" + std::to_string(decode_wide_index()); break;
-                case AddFeature: result = "AddFeature #" + std::to_string(decode_wide_index()); break;
-                case SubFeature: result = "SubFeature #" + std::to_string(decode_wide_index()); break;
+                case LdScratch: result = "LdScratch #" + std::to_string(decode_wide_index()) + reg_to_string(); break;
+                case StScratch: result = "StScratch #" + std::to_string(decode_wide_index()) + reg_to_string(); break;
+                case AddFeature: result = "AddFeature #" + std::to_string(decode_wide_index()) + reg_to_string(); break;
+                case SubFeature: result = "SubFeature #" + std::to_string(decode_wide_index()) + reg_to_string(); break;
+                case Finalize: result = "Finalize #" + std::to_string(decode_bucket()); break;
                 case Exit: result = "Exit"; break;
                 default: result = "unknown"; break;
             }
@@ -176,6 +177,12 @@ namespace Stockfish::GPU
         {
             assert(opcode() == Finalize);
             return bool(data >> (OpcodeBits + BucketBits));
+        }
+
+    private:
+        std::string reg_to_string() const
+        {
+            return std::string(", ") + "ABCD"[decode_reg()];
         }
     };
 }

@@ -968,15 +968,6 @@ void update_threats_accumulator_full(Color                                 persp
 
 void prepare_for_finalize(GPU::RegisterMachine* machine, const AccumulatorState<Features::HalfKAv2_hm>& acc, const AccumulatorState<Features::FullThreats>& threatsAcc)
 {
-    machine->flush();
-    machine->blockUntilComplete();
-    auto sc = machine->read_scratch(acc.scratchSlot[0]);
-        for (int i = 0; i < 50; ++i)
-        {
-            std::cout << sc[i] << ' ' << acc.accumulatorBig.accumulation[0][i] << '\n';
-        }
-        abort();
-
     machine->submit(GPU::Instruction::load_scratch(GPU::A, acc.scratchSlot[0]));
     machine->submit(GPU::Instruction::load_scratch(GPU::B, acc.scratchSlot[1]));
     machine->submit(GPU::Instruction::load_scratch(GPU::C, threatsAcc.scratchSlot[0]));

@@ -57,7 +57,7 @@ namespace Stockfish::GPU
             auto sparse_input_buckets = big.get_input_buckets();
 
             auto temp = std::make_unique<Eval::NNUE::BigFeatureTransformer>(transformer);
-            //temp->unpermute_weights();
+            temp->unpermute_weights();
 
             checkError(cudaMalloc(&this->transformer, sizeof(*temp)));
             checkError(cudaMemcpy(this->transformer, &*temp, sizeof(*temp), cudaMemcpyHostToDevice));
@@ -324,17 +324,22 @@ namespace Stockfish::GPU
                     }
                 case Finalize: {
                         // First compute pairwise multiplication values
-                        unsigned packed[L1EntriesPerThreadSlice / 4];
+                        unsigned packed[L1EntriesPerThreadSlice / 4] = {0};
+
+                        auto cvt = [] (int a)
+                        {
+                            return a << 16 >> 16;
+                        };
 
 #pragma unroll
-                        for (int p = 0; p < 2; ++p) {
+                        for (int p = 0, k = 0; p < 2; ++p) {
                             int32_t *src1 = p ? regB : regA;
                             int32_t *src2 = p ? regD : regC;
                             int offset = p * (L1EntriesPerThreadSlice / 8);
 #pragma unroll
                             for (int i = 0; i < L1EntriesPerThreadSlice / 2; ++i) {
-                                int sum0 = std::clamp(int16_t(src1[i] + src1[i + L1EntriesPerThreadSlice / 2]), int16_t(0), int16_t(255));
-                                int sum1 = std::clamp(int16_t(src2[i] + src2[i + L1EntriesPerThreadSlice / 2]), int16_t(0), int16_t(255));
+                                int sum0 = std::clamp(cvt(src1[i] + src2[i]), 0, 255);
+                                int sum1 = std::clamp(cvt(src1[i+ L1EntriesPerThreadSlice / 2] + src2[i + L1EntriesPerThreadSlice / 2]), 0, 255);
                                 int shamt = (i % 4) * 8;
                                 packed[offset + i / 4] &= ~(0xff << shamt);
                                 packed[offset + i / 4] |= uint8_t((sum0 * sum1) / 512) << shamt;
@@ -355,6 +360,7 @@ namespace Stockfish::GPU
                         Eval::NNUE::L1Bucket* bucket = &buckets[inst.decode_bucket()];
                         int accumulation = lane_id < 16 ? bucket->biases[lane_id] : 0;
 
+                        __syncwarp();
 #pragma unroll
                         for (int j = 0, q = lane_id >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
                         {
@@ -374,7 +380,7 @@ namespace Stockfish::GPU
                         accumulation += __shfl_down_sync(0xFFFFFFFF, accumulation, 16);
 
                         if (lane_id < 16)
-                            machine->result[lane_id] = int(accumulation);
+                            machine->result[lane_id] = accumulation;
                         goto done;
                 }
                 case ResetReg: {
@@ -435,7 +441,6 @@ namespace Stockfish::GPU
 
     void RegisterMachine::submit(Instruction instr)
     {
-        std::cout << "Instr: " << instr.to_string() << std::endl;
         if (!isActive)
         {
             fprintf(stderr, "RegisterMachine is inactive!\n");

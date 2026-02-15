@@ -184,13 +184,18 @@ NetworkOutput Network<Arch, Transformer>::evaluate(const Position&   pos,
 
     const int  bucket = (pos.count<ALL_PIECES>() - 1) / 4;
     const auto psqt =
-        featureTransformer.transform(pos, accumulatorStack, cache, transformedFeatures, bucket);
+        featureTransformer.transform(pos, accumulatorStack, cache, transformedFeatures, bucket, worker ? worker->registerMachine : nullptr);
 
     if (worker)
     {
+        worker->registerMachine->submit(GPU::Instruction::finalize(bucket, pos.side_to_move() == BLACK));
         worker->registerMachine->flush();
         worker->yield_to_next();
         worker->registerMachine->blockUntilComplete();
+
+        auto result = worker->registerMachine->read_result();
+        const auto positional = network[bucket].propagate_later(result);
+        return {static_cast<Value>(psqt / OutputScale), static_cast<Value>(positional / OutputScale)};
     }
 
     const auto positional = network[bucket].propagate(transformedFeatures);
@@ -257,7 +262,7 @@ Network<Arch, Transformer>::trace_evaluate(const Position&                      
     for (IndexType bucket = 0; bucket < LayerStacks; ++bucket)
     {
         const auto materialist =
-          featureTransformer.transform(pos, accumulatorStack, cache, transformedFeatures, bucket);
+          featureTransformer.transform(pos, accumulatorStack, cache, transformedFeatures, bucket, nullptr);
         const auto positional = network[bucket].propagate(transformedFeatures);
 
         t.psqt[bucket]       = static_cast<Value>(materialist / OutputScale);

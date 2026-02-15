@@ -899,16 +899,16 @@ void update_threats_accumulator_full(Color                                 persp
             const size_t offset = Dimensions * index;
             auto*        column = reinterpret_cast<const vec_i8_t*>(&threatWeights[offset]);
 
-    #ifdef USE_NEON
+#ifdef USE_NEON
             for (IndexType k = 0; k < Tiling::NumRegs; k += 2)
             {
                 acc[k]     = vec_add_16(acc[k], vmovl_s8(vget_low_s8(column[k / 2])));
                 acc[k + 1] = vec_add_16(acc[k + 1], vmovl_high_s8(column[k / 2]));
             }
-    #else
+#else
             for (IndexType k = 0; k < Tiling::NumRegs; ++k)
                 acc[k] = vec_add_16(acc[k], vec_convert_8_16(column[k]));
-    #endif
+#endif
         }
 
         for (IndexType k = 0; k < Tiling::NumRegs; k++)
@@ -964,6 +964,23 @@ void update_threats_accumulator_full(Color                                 persp
 #endif
 }
 
+}
+
+void prepare_for_finalize(GPU::RegisterMachine* machine, const AccumulatorState<Features::HalfKAv2_hm>& acc, const AccumulatorState<Features::FullThreats>& threatsAcc)
+{
+    machine->flush();
+    machine->blockUntilComplete();
+    auto sc = machine->read_scratch(acc.scratchSlot[0]);
+        for (int i = 0; i < 50; ++i)
+        {
+            std::cout << sc[i] << ' ' << acc.accumulatorBig.accumulation[0][i] << '\n';
+        }
+        abort();
+
+    machine->submit(GPU::Instruction::load_scratch(GPU::A, acc.scratchSlot[0]));
+    machine->submit(GPU::Instruction::load_scratch(GPU::B, acc.scratchSlot[1]));
+    machine->submit(GPU::Instruction::load_scratch(GPU::C, threatsAcc.scratchSlot[0]));
+    machine->submit(GPU::Instruction::load_scratch(GPU::D, threatsAcc.scratchSlot[1]));
 }
 
 }

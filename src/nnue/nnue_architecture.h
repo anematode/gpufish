@@ -139,6 +139,37 @@ struct NetworkArchitecture {
         return outputValue;
     }
 
+    std::int32_t propagate_later(const std::array<int32_t, 16>& data) const {
+        struct alignas(CacheLineSize) Buffer {
+            alignas(CacheLineSize) typename decltype(ac_sqr_0)::OutputType
+              ac_sqr_0_out[ceil_to_multiple<IndexType>(FC_0_OUTPUTS * 2, 32)];
+            alignas(CacheLineSize) typename decltype(ac_0)::OutputBuffer ac_0_out;
+            alignas(CacheLineSize) typename decltype(fc_1)::OutputBuffer fc_1_out;
+            alignas(CacheLineSize) typename decltype(ac_1)::OutputBuffer ac_1_out;
+            alignas(CacheLineSize) typename decltype(fc_2)::OutputBuffer fc_2_out;
+
+            Buffer() { std::memset(this, 0, sizeof(*this)); }
+        };
+
+        alignas(CacheLineSize) static thread_local Buffer buffer;
+
+        ac_sqr_0.propagate(&data[0], buffer.ac_sqr_0_out);
+        ac_0.propagate(&data[0], buffer.ac_0_out);
+        std::memcpy(buffer.ac_sqr_0_out + FC_0_OUTPUTS, buffer.ac_0_out,
+                    FC_0_OUTPUTS * sizeof(typename decltype(ac_0)::OutputType));
+        fc_1.propagate(buffer.ac_sqr_0_out, buffer.fc_1_out);
+        ac_1.propagate(buffer.fc_1_out, buffer.ac_1_out);
+        fc_2.propagate(buffer.ac_1_out, buffer.fc_2_out);
+
+        // buffer.fc_0_out[FC_0_OUTPUTS] is such that 1.0 is equal to 127*(1<<WeightScaleBits) in
+        // quantized form, but we want 1.0 to be equal to 600*OutputScale
+        std::int32_t fwdOut =
+          (data[FC_0_OUTPUTS]) * (600 * OutputScale) / (127 * (1 << WeightScaleBits));
+        std::int32_t outputValue = buffer.fc_2_out[0] + fwdOut;
+
+        return outputValue;
+    }
+
     std::size_t get_content_hash() const {
         std::size_t h = 0;
         hash_combine(h, fc_0.get_content_hash());

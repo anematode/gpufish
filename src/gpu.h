@@ -51,9 +51,9 @@ namespace Stockfish::GPU
             } else
             {
                 memcpy(&to->list, list, sizeof(Instruction) * count);
-                __atomic_thread_fence(__ATOMIC_RELEASE);
+                asm volatile ("" ::: "memory" );
                 memcpy(&to->data, &data, 4);
-                __atomic_thread_fence(__ATOMIC_RELEASE);
+                asm ("sfence");
             }
         }
     };
@@ -71,6 +71,12 @@ namespace Stockfish::GPU
         bool ready() const;
 
         std::array<int16_t, L1Size> read_scratch(size_t index);
+        std::array<int32_t, 16> read_result() const
+        {
+            std::array<int32_t, 16> result;
+            std::copy_n(this->result, 16, result.begin());
+            return result;
+        }
 
         template<Eval::NNUE::SIMD::UpdateOperation... ops,
                  std::enable_if_t<sizeof...(ops) == 0, bool> = true>

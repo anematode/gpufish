@@ -169,7 +169,7 @@ namespace Stockfish::GPU
         constexpr size_t decode_bucket() const
         {
             assert(opcode() == Finalize);
-            return data >> OpcodeBits;
+            return data >> OpcodeBits & 0x7;
         }
 
         constexpr bool side_to_move() const

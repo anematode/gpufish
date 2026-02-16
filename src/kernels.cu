@@ -121,21 +121,6 @@ namespace Stockfish::GPU
         switch (op)
         {
         case Add:
-            i1 += i << 24 >> 24;
-            i2 += i << 16 >> 24;
-            i3 += i << 8 >> 24;
-            i4 += i >> 24;
-            return;
-        case Sub:
-            i1 -= i << 24 >> 24;
-            i2 -= i << 16 >> 24;
-            i3 -= i << 8 >> 24;
-            i4 -= i >> 24;
-            return;
-        case Store:
-            assert(false);
-#if 0
-        case Add:
             i1 = __dp4a(i, 0x1, i1);
             i2 = __dp4a(i, 0x1 << 8, i2);
             i3 = __dp4a(i, 0x1 << 16, i3);
@@ -149,7 +134,6 @@ namespace Stockfish::GPU
             return;
         case Store:
             assert(false);
-#endif
         }
     }
 

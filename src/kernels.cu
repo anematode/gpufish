@@ -166,6 +166,7 @@ namespace Stockfish::GPU
         i &= ~(0xff << shamt);
         i |= byte << shamt;
     }
+
     __global__ void persistent_kernel(RegisterMachine* machines, WCInstructionBuffer* buffers, int num_machines) {
         unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
         unsigned lane_id = threadIdx.x % ThreadsPerWarp;
@@ -490,7 +491,7 @@ namespace Stockfish::GPU
         int attempts = 0;
         while (!ready())  // TODO add a "perf counter" for this
         {
-            asm("clflush %0" :: "m"(result[0]));
+            // asm("clflush %0" :: "m"(result[0]));
             asm("pause");
             /*if (attempts++ >= 1000000)
             {

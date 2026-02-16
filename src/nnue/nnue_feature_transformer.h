@@ -264,6 +264,9 @@ class FeatureTransformer {
         if (machine)
         {
             prepare_for_finalize(machine, accumulatorState, threatAccumulatorState);
+#ifdef NO_CPU_EVAL
+            return psqt;
+#endif
         }
 
         for (IndexType p = 0; p < 2; ++p)

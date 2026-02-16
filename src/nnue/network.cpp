@@ -190,31 +190,12 @@ NetworkOutput Network<Arch, Transformer>::evaluate(const Position&   pos,
     {
         worker->registerMachine->submit(GPU::Instruction::finalize(bucket, pos.side_to_move() == BLACK));
         worker->registerMachine->flush();
+
         worker->yield_to_next();
         worker->registerMachine->blockUntilComplete();
 
         auto result = worker->registerMachine->read_result();
         const auto positional = network[bucket].propagate_later(result);
-        int32_t buf[16];
-        auto correct = network[bucket].propagate(transformedFeatures, buf);
-
-        if (correct != positional)
-        {
-            auto& thAcc = accumulatorStack.latest<PSQFeatureSet>();
-
-            auto gpu = worker->registerMachine->read_scratch(thAcc.scratchSlot[BLACK]);
-            for (int i = 0; i < 8; ++i)
-            {
-                std::cout << thAcc.accumulatorBig.accumulation[BLACK][i] << ' ' << gpu[i] << '\n';
-            }
-
-            std::cout << "correct: " << correct << ' ' << positional << '\n';
-            for (int i = 0; i < 16; ++i)
-            {
-                std::cout << buf[i] << ' ' << result[i] << '\n';
-            }
-            abort();
-        }
         return {static_cast<Value>(psqt / OutputScale), static_cast<Value>(positional / OutputScale)};
     }
 

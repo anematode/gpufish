@@ -25,7 +25,7 @@ namespace Stockfish::GPU
             {
                 uint16_t instructionCount;
                 uint16_t id;
-            };
+            } s;
             uint32_t data;
         };
         Instruction list[MaxInstructionsCount];
@@ -33,9 +33,9 @@ namespace Stockfish::GPU
 
         void flush(WCInstructionBuffer* to)
         {
-            id++;
+            s.id++;
 
-            uint32_t count = instructionCount;
+            uint32_t count = s.instructionCount;
             constexpr bool UseMovdir64B = false;
             if constexpr (UseMovdir64B)
             {
@@ -43,7 +43,7 @@ namespace Stockfish::GPU
                 const char* src = reinterpret_cast<char*>(this);
 
                 // We need to copy this many lines in reverse
-                ptrdiff_t lines = (count * sizeof(Instruction) + sizeof(instructionCount) + 63) / 64;
+                ptrdiff_t lines = (count * sizeof(Instruction) + sizeof(s.instructionCount) + 63) / 64;
                 for (ptrdiff_t j = lines - 1; j >= 0; --j)
                 {
                     asm ("movdir64b %1, %0" :: "r"(dest + 64 * j), "m"(src[64 * j]) : "memory");
@@ -73,9 +73,9 @@ namespace Stockfish::GPU
         std::array<int16_t, L1Size> read_scratch(size_t index);
         std::array<int32_t, 16> read_result() const
         {
-            std::array<int32_t, 16> result;
-            std::copy_n(this->result, 16, result.begin());
-            return result;
+            std::array<int32_t, 16> r;
+            std::copy_n(this->result, 16, r.begin());
+            return r;
         }
 
         template<Eval::NNUE::SIMD::UpdateOperation... ops,

@@ -345,10 +345,12 @@ struct AccumulatorUpdateContext {
         machine->update_features<ops...>(reg, indices...);
         machine->submit(GPU::Instruction::store_scratch(to.scratchSlot[perspective], reg));
 
+#ifndef NO_CPU_EVAL
         fused_row_reduce<Vec16Wrapper, Dimensions, ops...>(
           (from.template acc<Dimensions>()).accumulation[perspective].data(),
           (to.template acc<Dimensions>()).accumulation[perspective].data(),
           to_weight_vector(indices)...);
+#endif
 
         fused_row_reduce<Vec32Wrapper, PSQTBuckets, ops...>(
           (from.template acc<Dimensions>()).psqtAccumulation[perspective].data(),
@@ -379,6 +381,7 @@ struct AccumulatorUpdateContext {
         vec_t      acc[Tiling::NumRegs];
         psqt_vec_t psqt[Tiling::NumPsqtRegs];
 
+#ifndef NO_CPU_EVAL
         const auto* threatWeights = &featureTransformer.threatWeights[0];
 
         for (IndexType j = 0; j < Dimensions / Tiling::TileHeight; ++j)
@@ -430,6 +433,8 @@ struct AccumulatorUpdateContext {
 
             threatWeights += Tiling::TileHeight;
         }
+
+#endif
 
         for (IndexType j = 0; j < PSQTBuckets / Tiling::PsqtTileHeight; ++j)
         {
@@ -738,6 +743,8 @@ void update_accumulator_refresh_cache(Color                                 pers
     vec_t      acc[Tiling::NumRegs];
     psqt_vec_t psqt[Tiling::NumPsqtRegs];
 
+
+#ifndef NO_CPU_EVAL
     const auto* weights = &featureTransformer.weights[0];
 
     for (IndexType j = 0; j < Dimensions / Tiling::TileHeight; ++j)
@@ -788,6 +795,7 @@ void update_accumulator_refresh_cache(Color                                 pers
 
         weights += Tiling::TileHeight;
     }
+#endif
 
     for (IndexType j = 0; j < PSQTBuckets / Tiling::PsqtTileHeight; ++j)
     {
@@ -881,6 +889,7 @@ void update_threats_accumulator_full(Color                                 persp
     vec_t      acc[Tiling::NumRegs];
     psqt_vec_t psqt[Tiling::NumPsqtRegs];
 
+#ifndef NO_CPU_EVAL
     const auto* threatWeights = &featureTransformer.threatWeights[0];
 
     for (IndexType j = 0; j < Dimensions / Tiling::TileHeight; ++j)
@@ -916,6 +925,8 @@ void update_threats_accumulator_full(Color                                 persp
 
         threatWeights += Tiling::TileHeight;
     }
+
+#endif
 
     for (IndexType j = 0; j < PSQTBuckets / Tiling::PsqtTileHeight; ++j)
     {

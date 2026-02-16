@@ -381,7 +381,7 @@ namespace Stockfish::GPU
 
                         if (lane_id < 16)
                             machine->result[lane_id] = accumulation;
-                        __threadfence_system();
+                        __threadfence_system(); // tbh I don't understand why this is necessary but *shrug*
                         goto done;
                 }
                 case ResetReg: {
@@ -449,27 +449,27 @@ namespace Stockfish::GPU
             fprintf(stderr, "RegisterMachine is inactive!\n");
             abort();
         }
-        if (staging.instructionCount >= MaxInstructionsCount)
+        if (staging.s.instructionCount >= MaxInstructionsCount)
         {
             // Need an immediate flush before writing the next instruction
             // Mainly used during setup
             flush();
             blockUntilComplete();
         }
-        if (instr.opcode() == LdScratch && staging.instructionCount > 0)
+        if (instr.opcode() == LdScratch && staging.s.instructionCount > 0)
         {
-            const auto& prev = staging.list[staging.instructionCount - 1];
+            const auto& prev = staging.list[staging.s.instructionCount - 1];
             if (prev.opcode() == StScratch && prev.decode_wide_index() == instr.decode_wide_index() && prev.decode_reg() == instr.decode_reg())
             {
                 return;
             }
         }
-        staging.list[staging.instructionCount++] = instr;
+        staging.list[staging.s.instructionCount++] = instr;
     }
 
     void RegisterMachine::flush()
     {
-        if (staging.instructionCount == 0)
+        if (staging.s.instructionCount == 0)
         {
             result[0] = 0;  // prevent accidentally waiting
             return;
@@ -496,13 +496,7 @@ namespace Stockfish::GPU
             }*/
         }
 
-        staging.instructionCount = 0;
-
-        // TODO verify that all entries are written
-
-        // dbg_mean_of(__rdtscp(&_) - start, 1);
-        // dbg_mean_of(goose - start, 2);
-        // dbg_mean_of(__rdtscp(&_) - goose, 3);
+        staging.s.instructionCount = 0;
     }
 
     bool RegisterMachine::ready() const

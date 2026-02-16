@@ -155,6 +155,19 @@ namespace Stockfish::GPU
         i |= byte << shamt;
     }
 
+    __device__ void parallel_copy(Eval::NNUE::L1Bucket& dest, const Eval::NNUE::L1Bucket& src, unsigned lane_id)
+    {
+        using u32 = uint32_t __attribute__((may_alias));
+        u32* d = (u32*)&dest;
+        const u32* s = (const u32*)&src;
+
+        uint32_t count = sizeof(dest) / sizeof(u32);
+        for (uint32_t i = lane_id; i < count; i += ThreadsPerWarp)
+        {
+            d[i] = s[i];
+        }
+    }
+
     __global__ void persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num_machines) {
         unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
         unsigned lane_id = threadIdx.x % ThreadsPerWarp;
@@ -200,6 +213,11 @@ case 3: { auto& r = regD; X; break; } \
 default: __builtin_unreachable(); \
 };
 
+        constexpr int SharedMemoryBuckets = 4;
+
+        __shared__ Eval::NNUE::L1Bucket bucketsShared[SharedMemoryBuckets];
+        int sharedBucketOffset = 8;  // bucketsShared[i - sharedBucketOffset], if in range, is buckets[i]
+
         __shared__ Instruction cmdBuffers[MaxInstructionsCount * 4];
         Instruction* myCmdBuffer = &cmdBuffers[warp_id % 4];
 
@@ -233,6 +251,20 @@ default: __builtin_unreachable(); \
                 {
                 case SwitchMachine:
                     break;
+                case LoadL1Buckets:
+                    {
+                        __syncwarp();
+                        sharedBucketOffset = inst.decode_bucket() - SharedMemoryBuckets + 1;
+
+                        for (int i = 0; i < SharedMemoryBuckets; ++i)
+                        {
+                            int source = i + sharedBucketOffset;
+                            if (source < 0 || source >= 8) continue;
+
+                            parallel_copy(bucketsShared[i], buckets[source], lane_id);
+                        }
+                        break;
+                    }
                 case Exit:
                     {
                         if (lane_id == 0)
@@ -360,7 +392,16 @@ default: __builtin_unreachable(); \
                             }
                         }
 
-                        Eval::NNUE::L1Bucket* bucket = &buckets[inst.decode_bucket()];
+                        int bi = inst.decode_bucket();
+                        Eval::NNUE::L1Bucket* bucket;
+                        unsigned sharedIndex = bi - sharedBucketOffset;
+                        if (sharedIndex < SharedMemoryBuckets)
+                        {
+                            bucket = &bucketsShared[sharedIndex];
+                        } else
+                        {
+                            bucket = &buckets[bi];
+                        }
                         int accumulation = lane_id < 16 ? bucket->biases[lane_id] : 0;
 
                         __syncwarp();

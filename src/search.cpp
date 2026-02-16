@@ -216,6 +216,9 @@ void Search::Worker::start_searching() {
 
     accumulatorStack.machine = registerMachine;
 
+    int maxBucket = (rootPos.count<ALL_PIECES>() - 1) / 4;
+    registerMachine->submit(GPU::Instruction::preload_l1_buckets(maxBucket));
+
     // Non-main threads go directly to iterative_deepening()
     if (!is_mainthread())
     {

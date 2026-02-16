@@ -37,6 +37,9 @@ namespace Stockfish::GPU
         Exit = 6,
         // Fill register with biases
         ResetReg = 7,
+        // Copy L1 buckets n:n-4 into shared memory. Should only be called with bucket index >= the bucket index of
+        // the root position.
+        LoadL1Buckets = 8,
     };
 
     enum Reg
@@ -54,7 +57,7 @@ namespace Stockfish::GPU
     {
         uint32_t data;
 
-        static constexpr size_t OpcodeBits = 3;
+        static constexpr size_t OpcodeBits = 4;
         static constexpr size_t DataBits = 13;
         static constexpr size_t MaxMachineIndex = 1 << DataBits;
         static constexpr size_t WideIndexBits = 18;
@@ -73,10 +76,19 @@ namespace Stockfish::GPU
                 case AddFeature: result = "AddFeature #" + std::to_string(decode_wide_index()) + reg_to_string(); break;
                 case SubFeature: result = "SubFeature #" + std::to_string(decode_wide_index()) + reg_to_string(); break;
                 case Finalize: result = "Finalize #" + std::to_string(decode_bucket()); break;
+                case LoadL1Buckets: result = "LoadL1Buckets #" + std::to_string(decode_bucket()); break;
                 case Exit: result = "Exit"; break;
                 default: result = "unknown"; break;
             }
             return result;
+        }
+
+        static constexpr Instruction preload_l1_buckets(int max_bucket)
+        {
+            assert(max_bucket >= 0 && max_bucket <= 7);
+            return {
+            uint32_t((max_bucket << OpcodeBits) + LoadL1Buckets)
+            };
         }
 
         static constexpr Instruction switch_to_machine(size_t index)
@@ -146,7 +158,7 @@ namespace Stockfish::GPU
 
         constexpr Opcode opcode() const
         {
-            return Opcode(data & 7);
+            return Opcode(data & ((1 << OpcodeBits) - 1));
         }
 
         constexpr uint32_t machine_index() const
@@ -169,7 +181,7 @@ namespace Stockfish::GPU
 
         constexpr size_t decode_bucket() const
         {
-            assert(opcode() == Finalize);
+            assert(opcode() == Finalize || opcode() == LoadL1Buckets);
             return data >> OpcodeBits & 0x7;
         }
 

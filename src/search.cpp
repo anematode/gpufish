@@ -31,7 +31,6 @@
 #include <list>
 #include <ratio>
 #include <string>
-#include <ucontext.h>
 #include <utility>
 
 #include "bitboard.h"
@@ -191,9 +190,10 @@ bool Worker::yield_to_next() {
     for (size_t i = 1; i < thread->workers.size(); i++)
     {
         size_t index = (workerIdx + i) % thread->workers.size();
-        if (thread->workers[index]->is_active)
+        auto& next_thread = thread->workers[index];
+        if (next_thread->is_active)
         {
-            swapcontext(&activeContext, &thread->workers[index]->activeContext);
+            activeContext.switch_to(&next_thread->activeContext);
             return true;
         }
     }

@@ -38,8 +38,6 @@
 #include "uci.h"
 #include "ucioption.h"
 
-#include <ucontext.h>
-
 namespace Stockfish {
 
 const int WorkersPerThread = 8;
@@ -98,40 +96,26 @@ static void start_searching_fwd(int idx) {
 
     worker->start_searching();
     worker->is_active = false;
-
-    // safety mitigation: save this context just in case the worker is invoked after it is done.
-    // this should never happen, but may be useful for debugging the async scheduler.
-    // can be removed for optimisation
-    if (getcontext(&worker->activeContext) == -1)
-    {
-        perror("getcontext 2");
-        abort();
-    }
 }
 
 // Wakes up the thread that will start the search
 void Thread::start_searching() {
     run_custom_job([this]() {
-        ucontext_t main;
+        CoroutineContext main;
 
         curr_thread = this;
         for (size_t i = 0; i < workers.size(); ++i)
         {
-            auto& context = workers.at(i)->activeContext;
-            if (getcontext(&context) == -1)
-            {
-                perror("getcontext");
-                abort();
-            }
-            auto& worker             = workers.at(i);
-            context.uc_link          = &main;
-            context.uc_stack.ss_size = worker->contextStack.size;
-            context.uc_stack.ss_sp   = worker->contextStack.mem;
+            auto& worker  = workers.at(i);
+            auto* context = &worker->activeContext;
+
+            context->init_from_current_context();
+            context->set_parent_context(&main);
+            context->set_stack_region(worker->contextStack.mem, worker->contextStack.size);
 
             worker->is_active = true;
 
-            makecontext(&worker->activeContext, reinterpret_cast<void (*)()>(&start_searching_fwd),
-                        1, (int) i);
+            context->set_entry_point(&start_searching_fwd, i); // supply workerIdx (i)
         }
 
         // Iterate over all workers and step all active ones to completion
@@ -144,11 +128,7 @@ void Thread::start_searching() {
                     continue;
 
                 has_more = true;
-                if (swapcontext(&main, &worker->activeContext) == -1)
-                {
-                    perror("swapcontext 2");
-                    abort();
-                }
+                main.switch_to(&worker->activeContext);
             }
             if (!has_more)
                 break;

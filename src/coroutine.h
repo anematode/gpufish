@@ -56,26 +56,27 @@ class CoroutineContext {
     // sets the parent context.
     // after the entry function returns, control will be
     // switched to parent context.
-    void set_parent_context(CoroutineContext *parent);
+    void set_parent_context(CoroutineContext* parent);
 
     // provides a custom stack region for this context to use.
     // must be run before set_entry_point.
-    void set_stack_region(void *stack_pointer, size_t stack_size);
+    void set_stack_region(void* stackPointer, size_t stackSize);
 
     // sets up this context to begin invoking a given CoroutineFunction when switched to.
     // the current context and stack region must be initialized beforehand,
     // via the init_from_current_context() and set_stack_region() methods.
-    void set_entry_point(CoroutineFunction *func, int invocation_arg);
+    void set_entry_point(CoroutineFunction* func, int invocationArgument);
 
     // saves the current context into this object, and
     // switches to the target context.
-    void switch_to(CoroutineContext *target);
+    void switch_to(CoroutineContext& target);
 
    private:
 #if X86_64_COROUTINE_IMPL
-    CoroutineContext *parentContext;
-    char *stack;
-    CoroutineFunction *coroutineFunction;
+    CoroutineContext* parentContext;
+    char* stack;
+    CoroutineFunction* coroutineFunction;
+    int functionArgument;
 #else  // normal setcontext implementation
     ucontext_t context;
 #endif

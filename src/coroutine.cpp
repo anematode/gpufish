@@ -46,21 +46,21 @@ void CoroutineContext::init_from_current_context() {
     }
 }
 
-void CoroutineContext::set_parent_context(CoroutineContext *parent) {
+void CoroutineContext::set_parent_context(CoroutineContext* parent) {
     context.uc_link = &parent->context;
 }
 
-void CoroutineContext::set_stack_region(void *stack_pointer, size_t stack_size) {
-    context.uc_stack.ss_size = stack_size;
-    context.uc_stack.ss_sp   = stack_pointer;
+void CoroutineContext::set_stack_region(void* stackPointer, size_t stackSize) {
+    context.uc_stack.ss_size = stackSize;
+    context.uc_stack.ss_sp   = stackPointer;
 }
 
-void CoroutineContext::set_entry_point(CoroutineFunction *func, int invocation_arg) {
-    makecontext(&context, reinterpret_cast<void (*)()>(func), 1, (int) invocation_arg);
+void CoroutineContext::set_entry_point(CoroutineFunction* func, int invocationArgument) {
+    makecontext(&context, reinterpret_cast<void (*)()>(func), 1, (int) invocationArgument);
 }
 
-void CoroutineContext::switch_to(CoroutineContext *target) {
-    if (swapcontext(&context, &target->context) == -1)
+void CoroutineContext::switch_to(CoroutineContext& target) {
+    if (swapcontext(&context, &target.context) == -1)
     {
         perror("swapcontext");
         abort();

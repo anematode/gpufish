@@ -193,7 +193,7 @@ bool Worker::yield_to_next() {
         auto& next_thread = thread->workers[index];
         if (next_thread->is_active)
         {
-            activeContext.switch_to(&next_thread->activeContext);
+            activeContext.switch_to(next_thread->activeContext);
             return true;
         }
     }

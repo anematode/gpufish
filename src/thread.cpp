@@ -106,16 +106,16 @@ void Thread::start_searching() {
         curr_thread = this;
         for (size_t i = 0; i < workers.size(); ++i)
         {
-            auto& worker  = workers.at(i);
-            auto* context = &worker->activeContext;
+            auto& worker = workers.at(i);
+            auto& context = worker->activeContext;
 
-            context->init_from_current_context();
-            context->set_parent_context(&main);
-            context->set_stack_region(worker->contextStack.mem, worker->contextStack.size);
+            context.init_from_current_context();
+            context.set_parent_context(&main);
+            context.set_stack_region(worker->contextStack.mem, worker->contextStack.size);
 
             worker->is_active = true;
 
-            context->set_entry_point(&start_searching_fwd, i); // supply workerIdx (i)
+            context.set_entry_point(&start_searching_fwd, i); // supply workerIdx (i)
         }
 
         // Iterate over all workers and step all active ones to completion
@@ -128,7 +128,7 @@ void Thread::start_searching() {
                     continue;
 
                 has_more = true;
-                main.switch_to(&worker->activeContext);
+                main.switch_to(worker->activeContext);
             }
             if (!has_more)
                 break;

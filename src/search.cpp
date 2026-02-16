@@ -211,19 +211,10 @@ void Worker::join_all_other_workers() {
 
 void Search::Worker::start_searching() {
     uint32_t idx = 0;
-    accumulatorStack.reset(idx);
     refreshTable.assign_indices(idx);
+    accumulatorStack.reset(idx);
 
     accumulatorStack.machine = registerMachine;
-    registerMachine->submit(GPU::Instruction::reset_reg(GPU::A));
-
-    for (auto& r : refreshTable.big.entries)
-    {
-        for (auto & ent : r)
-        {
-            registerMachine->submit(GPU::Instruction::store_scratch(ent.scratchIndex, GPU::A));
-        }
-    }
 
     // Non-main threads go directly to iterative_deepening()
     if (!is_mainthread())
@@ -231,8 +222,6 @@ void Search::Worker::start_searching() {
         iterative_deepening();
         return;
     }
-
-    // std::cout << "Main thread started searching!\n"; // todo: cleanup print debug messages in this function
 
     main_manager()->tm.init(limits, rootPos.side_to_move(), rootPos.game_ply(), options,
                             main_manager()->originalTimeAdjust);
@@ -248,7 +237,6 @@ void Search::Worker::start_searching() {
     {
         threads.start_searching();  // start non-main threads
         iterative_deepening();      // main thread start searching
-        // std::cout << "Main thread done with ID!\n";
     }
 
     // When we reach the maximum depth, we can arrive here without a raise of
@@ -282,8 +270,6 @@ void Search::Worker::start_searching() {
     if (int(options["MultiPV"]) == 1 && !limits.depth && !limits.mate && !skill.enabled()
         && rootMoves[0].pv[0] != Move::none())
         bestThread = threads.get_best_worker();
-
-    // std::cout << "Finalizing analysis in main thread!\n";
 
     main_manager()->bestPreviousScore        = bestThread->rootMoves[0].score;
     main_manager()->bestPreviousAverageScore = bestThread->rootMoves[0].averageScore;
@@ -659,6 +645,21 @@ void Search::Worker::clear() {
         reductions[i] = int(2747 / 128.0 * std::log(i));
 
     refreshTable.clear(networks[numaAccessToken]);
+
+    uint32_t idx = 0;
+    refreshTable.assign_indices(idx);
+    registerMachine->submit(GPU::Instruction::reset_reg(GPU::A));
+
+    for (auto& r : refreshTable.big.entries)
+    {
+        for (auto & ent : r)
+        {
+            registerMachine->submit(GPU::Instruction::store_scratch(ent.scratchIndex, GPU::A));
+        }
+    }
+
+    registerMachine->flush();
+    registerMachine->blockUntilComplete();
 }
 
 

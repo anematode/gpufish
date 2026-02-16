@@ -96,8 +96,6 @@ namespace Stockfish::GPU
 
         void* stream;
 
-        uint64_t start;
-
         WCInstructionBuffer* wcBuffer;
         WCInstructionBuffer staging;
 

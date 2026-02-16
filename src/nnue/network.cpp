@@ -200,6 +200,14 @@ NetworkOutput Network<Arch, Transformer>::evaluate(const Position&   pos,
 
         if (correct != positional)
         {
+            auto& thAcc = accumulatorStack.latest<PSQFeatureSet>();
+
+            auto gpu = worker->registerMachine->read_scratch(thAcc.scratchSlot[BLACK]);
+            for (int i = 0; i < 8; ++i)
+            {
+                std::cout << thAcc.accumulatorBig.accumulation[BLACK][i] << ' ' << gpu[i] << '\n';
+            }
+
             std::cout << "correct: " << correct << ' ' << positional << '\n';
             for (int i = 0; i < 16; ++i)
             {

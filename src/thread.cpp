@@ -334,6 +334,7 @@ void ThreadPool::clear() {
     if (threads.size() == 0)
         return;
 
+    cudaContext->launch_persistent_kernel();
     for (auto&& th : threads)
         th->clear_worker();
 
@@ -348,6 +349,7 @@ void ThreadPool::clear() {
     main_manager()->bestPreviousScore  = VALUE_INFINITE;
     main_manager()->originalTimeAdjust = -1;
     main_manager()->tm.clear();
+    cudaContext->stop_all();
 }
 
 void ThreadPool::run_on_thread(size_t threadId, std::function<void()> f) {

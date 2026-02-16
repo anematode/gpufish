@@ -358,10 +358,10 @@ default: __builtin_unreachable(); \
                         break;
                     }
                 case Finalize: {
-                        // First compute pairwise multiplication values
+                        // Pairwise multiplication values
                         unsigned packed[L1EntriesPerThreadSlice / 4] = {0};
 
-                        auto cvt = [] (int a)
+                        auto to16 = [] (int a)
                         {
                             return a << 16 >> 16;
                         };
@@ -373,14 +373,16 @@ default: __builtin_unreachable(); \
                             int offset = p * (L1EntriesPerThreadSlice / 8);
 #pragma unroll
                             for (int i = 0; i < L1EntriesPerThreadSlice / 2; ++i) {
-                                int sum0 = std::clamp(cvt(src1[i] + src2[i]), 0, 255);
-                                int sum1 = std::clamp(cvt(src1[i+ L1EntriesPerThreadSlice / 2] + src2[i + L1EntriesPerThreadSlice / 2]), 0, 255);
+                                int sum0 = std::clamp(to16(src1[i] + src2[i]), 0, 255);
+                                int sum1 = std::clamp(to16(src1[i+ L1EntriesPerThreadSlice / 2] + src2[i + L1EntriesPerThreadSlice / 2]), 0, 255);
 
                                 insert_byte(packed[offset + i / 4],
                                     unsigned(sum0 * sum1) / 512, i % 4);
                             }
                         }
 
+                        // If it's black to move, we need to swap perspectives; because of our register layout
+                        // this is equivalent to exchanging the low and high halves within a thread
                         if (inst.side_to_move())
                         {
 #pragma unroll
@@ -392,18 +394,16 @@ default: __builtin_unreachable(); \
                             }
                         }
 
-                        int bi = inst.decode_bucket();
+                        int bucketIndex = inst.decode_bucket();
                         Eval::NNUE::L1Bucket* bucket;
-                        unsigned sharedIndex = bi - sharedBucketOffset;
-                        if (sharedIndex < SharedMemoryBuckets)
-                        {
-                            bucket = &bucketsShared[sharedIndex];
-                        } else
-                        {
-                            bucket = &buckets[bi];
-                        }
-                        int accumulation = lane_id < 16 ? bucket->biases[lane_id] : 0;
 
+                        unsigned sharedIndex = bucketIndex - sharedBucketOffset;
+                        if (sharedIndex < SharedMemoryBuckets)
+                            bucket = &bucketsShared[sharedIndex];
+                        else
+                            bucket = &buckets[bucketIndex];
+
+                        int accumulation = lane_id < 16 ? bucket->biases[lane_id] : 0;
                         __syncwarp();
 #pragma unroll
                         for (int j = 0, q = lane_id >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
@@ -428,7 +428,7 @@ default: __builtin_unreachable(); \
                         if (lane_id < 16)
                             machine->result[lane_id] = accumulation;
                         __threadfence_system(); // tbh I don't understand why this is necessary but *shrug*
-                        goto done;
+                       goto done;
                 }
                 case ResetReg: {
                         // Not performance critical, used just for resetting
@@ -457,7 +457,6 @@ default: __builtin_unreachable(); \
                 }
             }
 
-            __syncwarp();
             // Signal to the CPU that we're done with this batch
             if (lane_id == 0)
             {

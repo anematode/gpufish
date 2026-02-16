@@ -184,14 +184,7 @@ namespace Stockfish::GPU
 
     class CudaContext
     {
-        void *stream = nullptr;  // cudaStream_t
-
     public:
-        RegisterMachine *machines;
-        InstructionBuffer* wcBuffers;
-        size_t machineCount;
-        std::unique_ptr<WeightsData> weights;
-
         CudaContext(const Eval::NNUE::NetworkBig& big, size_t machineCount);
         void stop_all();
         RegisterMachine* get_machine(size_t size);
@@ -201,9 +194,14 @@ namespace Stockfish::GPU
 
         void launch_persistent_kernel();
         ~CudaContext();
-    };
 
-    std::unique_ptr<CudaContext> make_context(const Eval::NNUE::NetworkBig& networks, size_t machine_count);
+    private:
+        void *stream = nullptr;  // cudaStream_t
+        RegisterMachine *machines;
+        InstructionBuffer* wcBuffers;
+        size_t machineCount;
+        std::unique_ptr<WeightsData> weights;
+    };
 
 }
 

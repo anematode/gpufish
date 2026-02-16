@@ -537,9 +537,4 @@ default: __builtin_unreachable(); \
 
         persistent_kernel<<<num_blocks, threads_per_block, 0, (cudaStream_t) stream>>>(machines, wcBuffers, machineCount);
     }
-
-    std::unique_ptr<CudaContext> make_context(const Eval::NNUE::NetworkBig& networks, size_t machine_count)
-    {
-        return std::make_unique<CudaContext>(networks, machine_count);
-    }
 }

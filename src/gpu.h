@@ -109,6 +109,9 @@ namespace Stockfish::GPU
 
         // Device-side data pointer
         RegisterData *data;
+
+        // Scratch index that this register is equal to, or -1
+        int regStates[4];
     };
 
 

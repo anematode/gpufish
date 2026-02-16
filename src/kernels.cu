@@ -158,12 +158,11 @@ namespace Stockfish::GPU
         out = (i1 & 0xffff) + (unsigned(i2) << 16);
     }
 
-    __device__ void insert_byte(unsigned& i, uint8_t byte, int offset)
+    __device__ void insert_byte(unsigned& i, int byte, int offset)
     {
         assert(offset < 4);
 
         int shamt = offset * 8;
-        i &= ~(0xff << shamt);
         i |= byte << shamt;
     }
 
@@ -350,7 +349,7 @@ namespace Stockfish::GPU
                                 int sum0 = std::clamp(cvt(src1[i] + src2[i]), 0, 255);
                                 int sum1 = std::clamp(cvt(src1[i+ L1EntriesPerThreadSlice / 2] + src2[i + L1EntriesPerThreadSlice / 2]), 0, 255);
 
-                                insert_byte(packed[offset + i / 4], __mul24(sum0, sum1) / 512, i % 4);
+                                insert_byte(packed[offset + i / 4], unsigned(__mul24(sum0, sum1)) / 512, i % 4);
                             }
                         }
 
@@ -439,6 +438,8 @@ namespace Stockfish::GPU
         cudaStreamCreate((cudaStream_t*) &stream);
         checkError(cudaMalloc(&data, sizeof(RegisterData)));
         checkError(cudaMemset(data, 0, sizeof(RegisterData)));
+
+        std::fill_n(regStates, 4, -1);
     }
 
     void RegisterMachine::deinit()
@@ -452,11 +453,14 @@ namespace Stockfish::GPU
 
     void RegisterMachine::submit(Instruction instr)
     {
+#ifndef NDEBUG
         if (!isActive)
         {
             fprintf(stderr, "RegisterMachine is inactive!\n");
             abort();
         }
+#endif
+
         if (staging.s.instructionCount >= MaxInstructionsCount)
         {
             // Need an immediate flush before writing the next instruction
@@ -464,6 +468,8 @@ namespace Stockfish::GPU
             flush();
             blockUntilComplete();
         }
+
+        // TODO better optimizations to reduce loads/stores
         if (instr.opcode() == LdScratch && staging.s.instructionCount > 0)
         {
             const auto& prev = staging.list[staging.s.instructionCount - 1];
@@ -514,7 +520,10 @@ namespace Stockfish::GPU
 
     std::array<int16_t, 1024> RegisterMachine::read_scratch(size_t index)
     {
+        // We're not synchronizing with the persistent kernel's stream, so this is shoddy, but this is for debug
+        // purposes so we just do this.
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
         std::array<int16_t, 1024> array;
         std::fill(array.begin(), array.end(), 5);
         cudaStream_t stream;

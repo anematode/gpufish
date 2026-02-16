@@ -363,8 +363,6 @@ default: __builtin_unreachable(); \
 #pragma unroll
                         for (int j = 0, q = lane_id >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
                         {
-
-#pragma unroll 1
                             for (int th_i = 0; th_i < ThreadsPerWarp; ++th_i, q += 2)
                             {
                                 int b1 = __shfl_sync(0xFFFFFFFF, packed[j], th_i);

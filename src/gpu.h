@@ -35,17 +35,17 @@ namespace Stockfish::GPU
 
         void set_instruction_count(uint16_t count)
         {
+            assert(get_instruction_count() < MaxInstructionsCount);
             memcpy(&data, &count, 2);
         }
 
 
         void flush(InstructionBuffer* to)
         {
-            data += 0x10000;  // increment ID so GPU can distinguish two payloads with equal instruction counts
-
             memcpy(&to->list, list, sizeof(Instruction) * get_instruction_count());
             std::atomic_thread_fence(std::memory_order_release);
 
+            data += 0x10000;  // increment ID so GPU can distinguish two payloads with equal instruction counts
             to->data = data;
 
             // The destination buffer is allocated in write-combining memory, so we use an sfence
@@ -101,10 +101,11 @@ namespace Stockfish::GPU
             int instrCount = staging.get_instruction_count();
             if (__builtin_expect(instrCount >= MaxInstructionsCount, 0))
             {
-                // Need an immediate flush before writing the next instruction
-                // Mainly used during setup
+                // Need an immediate flush before writing the next instruction.
+                // Mainly used during setup, but important for correctness.
                 flush();
                 blockUntilComplete();
+                instrCount = 0;
             }
 
             switch (instr.opcode())
@@ -112,6 +113,7 @@ namespace Stockfish::GPU
             case LdScratch:
                 if (regStates[instr.decode_reg()] == int(instr.decode_wide_index()))
                 {
+                    // We're loading from a scratch reg that we just wrote this register to -- skip it
                     return;
                 }
                 break;

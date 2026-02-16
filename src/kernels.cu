@@ -422,8 +422,6 @@ namespace Stockfish::GPU
         cudaStreamCreate((cudaStream_t*) &stream);
         checkError(cudaMalloc(&data, sizeof(RegisterData)));
         checkError(cudaMemset(data, 0, sizeof(RegisterData)));
-
-        std::fill_n(regStates, 4, -1);
     }
 
     void RegisterMachine::deinit()
@@ -453,15 +451,25 @@ namespace Stockfish::GPU
             blockUntilComplete();
         }
 
-        // TODO better optimizations to reduce loads/stores
-        if (instr.opcode() == LdScratch && staging.s.instructionCount > 0)
+        switch (instr.opcode())
         {
-            const auto& prev = staging.list[staging.s.instructionCount - 1];
-            if (prev.opcode() == StScratch && prev.decode_wide_index() == instr.decode_wide_index() && prev.decode_reg() == instr.decode_reg())
+        case LdScratch:
+            if (regStates[instr.decode_reg()] == instr.decode_wide_index())
             {
                 return;
             }
+            break;
+        case StScratch:
+            regStates[instr.decode_reg()] = instr.decode_wide_index();
+            break;
+        case AddFeature:
+        case SubFeature:
+        case ResetReg:
+            regStates[instr.decode_reg()] = -1;
+            break;
+        default: break;
         }
+
         staging.list[staging.s.instructionCount++] = instr;
     }
 
@@ -472,8 +480,10 @@ namespace Stockfish::GPU
             result[0] = 0;  // prevent accidentally waiting
             return;
         }
+
         std::fill_n(result, 16, INT_MIN);
         staging.flush(wcBuffer);
+        std::fill_n(regStates, 4, -1);
     }
 
     void RegisterMachine::blockUntilComplete()

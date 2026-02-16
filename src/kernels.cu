@@ -158,6 +158,14 @@ namespace Stockfish::GPU
         out = (i1 & 0xffff) + (unsigned(i2) << 16);
     }
 
+    __device__ void insert_byte(unsigned& i, uint8_t byte, int offset)
+    {
+        assert(offset < 4);
+
+        int shamt = offset * 8;
+        i &= ~(0xff << shamt);
+        i |= byte << shamt;
+    }
     __global__ void persistent_kernel(RegisterMachine* machines, WCInstructionBuffer* buffers, int num_machines) {
         unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
         unsigned lane_id = threadIdx.x % ThreadsPerWarp;
@@ -340,9 +348,8 @@ namespace Stockfish::GPU
                             for (int i = 0; i < L1EntriesPerThreadSlice / 2; ++i) {
                                 int sum0 = std::clamp(cvt(src1[i] + src2[i]), 0, 255);
                                 int sum1 = std::clamp(cvt(src1[i+ L1EntriesPerThreadSlice / 2] + src2[i + L1EntriesPerThreadSlice / 2]), 0, 255);
-                                int shamt = (i % 4) * 8;
-                                packed[offset + i / 4] &= ~(0xff << shamt);
-                                packed[offset + i / 4] |= uint8_t((sum0 * sum1) / 512) << shamt;
+
+                                insert_byte(packed[offset + i / 4], __mul24(sum0, sum1) / 512, i % 4);
                             }
                         }
 

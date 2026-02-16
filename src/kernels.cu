@@ -52,7 +52,6 @@ namespace Stockfish::GPU
 
         WeightsData(const Eval::NNUE::NetworkBig &big)
         {
-            std::cout << "Constructing a WeightsData!\n";
             const Eval::NNUE::BigFeatureTransformer& transformer = big.get_ft();
             auto sparse_input_buckets = big.get_input_buckets();
 

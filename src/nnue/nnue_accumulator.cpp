@@ -332,7 +332,7 @@ struct AccumulatorUpdateContext {
              typename... Ts,
              std::enable_if_t<is_all_same_v<IndexType, Ts...>, bool> = true>
     void apply(const Ts... indices) {
-        auto to_weight_vector = [&](const IndexType index) {
+        [[maybe_unused]] auto to_weight_vector = [&](const IndexType index) {
             return &featureTransformer.weights[index * Dimensions];
         };
 
@@ -360,8 +360,8 @@ struct AccumulatorUpdateContext {
 
     void apply(const typename FeatureSet::IndexList& added,
                const typename FeatureSet::IndexList& removed) {
-        const auto& fromAcc = from.template acc<Dimensions>().accumulation[perspective];
-        auto&       toAcc   = to.template acc<Dimensions>().accumulation[perspective];
+        [[maybe_unused]] const auto& fromAcc = from.template acc<Dimensions>().accumulation[perspective];
+        [[maybe_unused]] auto&       toAcc   = to.template acc<Dimensions>().accumulation[perspective];
 
         const auto& fromPsqtAcc = from.template acc<Dimensions>().psqtAccumulation[perspective];
         auto&       toPsqtAcc   = to.template acc<Dimensions>().psqtAccumulation[perspective];
@@ -378,7 +378,7 @@ struct AccumulatorUpdateContext {
 
 #ifdef VECTOR
         using Tiling = SIMDTiling<Dimensions, Dimensions, PSQTBuckets>;
-        vec_t      acc[Tiling::NumRegs];
+        [[maybe_unused]] vec_t      acc[Tiling::NumRegs];
         psqt_vec_t psqt[Tiling::NumPsqtRegs];
 
 #ifndef NO_CPU_EVAL
@@ -740,7 +740,7 @@ void update_accumulator_refresh_cache(Color                                 pers
     machine->submit(GPU::Instruction::store_scratch(accumulatorState.scratchSlot[perspective], reg));
 
 #ifdef VECTOR
-    vec_t      acc[Tiling::NumRegs];
+    [[maybe_unused]] vec_t      acc[Tiling::NumRegs];
     psqt_vec_t psqt[Tiling::NumPsqtRegs];
 
 
@@ -886,7 +886,7 @@ void update_threats_accumulator_full(Color                                 persp
     machine->submit(GPU::Instruction::store_scratch(accumulatorState.scratchSlot[perspective], reg));
 
 #ifdef VECTOR
-    vec_t      acc[Tiling::NumRegs];
+    [[maybe_unused]] vec_t      acc[Tiling::NumRegs];
     psqt_vec_t psqt[Tiling::NumPsqtRegs];
 
 #ifndef NO_CPU_EVAL

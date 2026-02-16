@@ -37,25 +37,13 @@ namespace Stockfish::GPU
             s.id++;
 
             uint32_t count = s.instructionCount;
-            constexpr bool UseMovdir64B = false;
-            if constexpr (UseMovdir64B)
-            {
-                char* dest = reinterpret_cast<char*>(to);
-                const char* src = reinterpret_cast<char*>(this);
+            memcpy(&to->list, list, sizeof(Instruction) * count);
 
-                // We need to copy this many lines in reverse
-                ptrdiff_t lines = (count * sizeof(Instruction) + sizeof(s.instructionCount) + 63) / 64;
-                for (ptrdiff_t j = lines - 1; j >= 0; --j)
-                {
-                    asm ("movdir64b %1, %0" :: "r"(dest + 64 * j), "m"(src[64 * j]) : "memory");
-                }
-            } else
-            {
-                memcpy(&to->list, list, sizeof(Instruction) * count);
-                asm volatile ("" ::: "memory" );
-                memcpy(&to->data, &data, 4);
-                asm ("sfence");
-            }
+            // TODO: ARM needs an actual barrier here
+            asm volatile ("" ::: "memory");
+
+            memcpy(&to->data, &data, 4);
+            asm ("sfence");
         }
     };
 
@@ -83,16 +71,9 @@ namespace Stockfish::GPU
         {
             while (!ready())  // TODO add a "perf counter" for this
             {
+#ifdef __x86_64__
                 asm("pause");
-                /*if (attempts++ >= 1000000)
-                {
-                    std::cout << "Register machine at " << this << " failed to read the result in time!\n";
-                    for (int i = 0; i < staging.instructionCount; i++)
-                    {
-                        std::cout << "Instruction " << i << " " << staging.list[i].to_string() << "\n";
-                    }
-                    abort();
-                }*/
+#endif
             }
 
             staging.s.instructionCount = 0;
@@ -103,6 +84,7 @@ namespace Stockfish::GPU
             return result[0] != INT_MIN;
         }
 
+        // Marked always inline because we usually call with a constant instruction type
         __attribute__((always_inline)) void submit(Instruction instr)
         {
 #ifndef NDEBUG

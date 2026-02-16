@@ -408,17 +408,19 @@ default: __builtin_unreachable(); \
 #pragma unroll
                         for (int j = 0, q = lane_id >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
                         {
-                            for (int th_i = 0; th_i < ThreadsPerWarp; ++th_i, q += 2)
-                            {
+                            unsigned nnz = __ballot_sync(0xFFFFFFFF, packed[j] | packed[j + 1]);
+                            while (nnz) {
+                                int th_i = __ffs(nnz) - 1;
+                                nnz &= nnz - 1;
+
                                 int b1 = __shfl_sync(0xFFFFFFFF, packed[j], th_i);
                                 int b2 = __shfl_sync(0xFFFFFFFF, packed[j + 1], th_i);
 
                                 int selected = lane_id < 16 ? b1 : b2;
-                                if (selected)
-                                {
-                                    accumulation = __dp4a(selected, *((int*)&bucket->weights[64 * q] + (lane_id % 16)), accumulation);
-                                }
+                                accumulation = __dp4a(selected, *((int*)&bucket->weights[64 * (q + 2 * th_i)] + (lane_id % 16)), accumulation);
                             }
+
+                            q += ThreadsPerWarp * 2;
                         }
 
                         accumulation += __shfl_down_sync(0xFFFFFFFF, accumulation, 16);

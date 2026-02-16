@@ -87,12 +87,12 @@ class Network {
     NnueEvalTrace trace_evaluate(const Position&                         pos,
                                  AccumulatorStack&                       accumulatorStack,
                                  AccumulatorCaches::Cache<FTDimensions>& cache) const;
-    const Transformer& get_ft() const
+    const Transformer& get_feature_transformer() const
     {
         return featureTransformer;
     }
 
-    std::vector<const L1Bucket*> get_input_buckets() const
+    std::vector<const L1Bucket*> get_sparse_buckets() const
     {
         std::vector<const L1Bucket*> result;
         for (const auto& arch : network)
@@ -103,7 +103,7 @@ class Network {
     }
 
 
-public:
+private:
     void load_user_net(const std::string&, const std::string&);
     void load_internal();
 

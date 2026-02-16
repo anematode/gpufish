@@ -11,54 +11,62 @@
 
 namespace Stockfish::GPU
 {
-    // Forward decls
+    // (Forward decls)
     struct WeightsData;
     struct RegisterData;
 
-    // May be allocated in pinned host WC memory; instructions are copied here from the staging buffer. The GPU
+    // May be allocated in pinned host WC memory; instructions are copied CPU-side from the staging buffer. The GPU
     // polls the instructionCount to know when to start stepping. The instruction count should always be
     // written last (and technically with a store fence, but we're just using volatile and TSO for now).
-    struct alignas(64) WCInstructionBuffer
+    struct alignas(64) InstructionBuffer
     {
-        union
-        {
-            struct
-            {
-                uint16_t instructionCount;
-                uint16_t id;
-            } s;
-            uint32_t data;
-        };
+        // Low 16 bits are the instruction count; upper 16 bits are an id that serve to tell the GPU
+        // that the buffer has been updated.
+        uint32_t data;
         Instruction list[MaxInstructionsCount];
         char padding[64];
 
-        void flush(WCInstructionBuffer* to)
+        int get_instruction_count() const
         {
-            s.id++;
+            uint16_t val;
+            memcpy(&val, &data, 2);
+            return val;
+        }
 
-            uint32_t count = s.instructionCount;
-            memcpy(&to->list, list, sizeof(Instruction) * count);
+        void set_instruction_count(uint16_t count)
+        {
+            memcpy(&data, &count, 2);
+        }
 
-            // TODO: ARM needs an actual barrier here
-            asm volatile ("" ::: "memory");
 
-            memcpy(&to->data, &data, 4);
+        void flush(InstructionBuffer* to)
+        {
+            data += 0x10000;  // increment ID so GPU can distinguish two payloads with equal instruction counts
+
+            memcpy(&to->list, list, sizeof(Instruction) * get_instruction_count());
+            std::atomic_thread_fence(std::memory_order_release);
+
+            to->data = data;
+
+            // The destination buffer is allocated in write-combining memory, so we use an sfence
+#ifdef __x86_64__
             asm ("sfence");
+#endif
         }
     };
 
-    // Allocated on the host in pinned memory
+    // Allocated on the host in pinned memory (allowing efficient DMA from the GPU).
+    // Important functions are implemented here in the header to allow inlining (the .cu code can't be LTOed).
     struct RegisterMachine
     {
-        void init();
-        void deinit();
-        std::array<int16_t, L1Size> read_scratch(size_t index);
+        RegisterMachine(const WeightsData* weights, InstructionBuffer* wcInstructionBuffer);
+        ~RegisterMachine();
 
         void flush()
         {
-            if (staging.s.instructionCount == 0)
+            if (staging.get_instruction_count() == 0)
             {
-                result[0] = 0;  // prevent accidentally waiting
+                result[0] = 0;  // prevent accidentally blocking with blockUntilComplete()
                 return;
             }
 
@@ -69,33 +77,29 @@ namespace Stockfish::GPU
 
         void blockUntilComplete()
         {
-            while (!ready())  // TODO add a "perf counter" for this
+            while (!ready())
             {
 #ifdef __x86_64__
                 asm("pause");
 #endif
             }
 
-            staging.s.instructionCount = 0;
+            staging.set_instruction_count(0);
         }
 
-        bool ready() const
+        [[nodiscard]] bool ready() const
         {
             return result[0] != INT_MIN;
         }
 
-        // Marked always inline because we usually call with a constant instruction type
+        // Marked always inline because we usually call with a constant instruction type, which allows
+        // folding of the switc
         __attribute__((always_inline)) void submit(Instruction instr)
         {
-#ifndef NDEBUG
-            if (!isActive)
-            {
-                fprintf(stderr, "RegisterMachine is inactive!\n");
-                abort();
-            }
-#endif
+            assert(isActive && "Register machine is inactive");
 
-            if (staging.s.instructionCount >= MaxInstructionsCount)
+            int instrCount = staging.get_instruction_count();
+            if (__builtin_expect(instrCount >= MaxInstructionsCount, 0))
             {
                 // Need an immediate flush before writing the next instruction
                 // Mainly used during setup
@@ -122,14 +126,15 @@ namespace Stockfish::GPU
             default: break;
             }
 
-            staging.list[staging.s.instructionCount++] = instr;
+            staging.list[instrCount++] = instr;
+            staging.set_instruction_count(instrCount);
         }
 
 
         std::array<int32_t, 16> read_result() const
         {
             std::array<int32_t, 16> r;
-            std::copy_n(this->result, 16, r.begin());
+            memcpy(&r, const_cast<const int32_t*>(result), sizeof(r));
             return r;
         }
 
@@ -148,11 +153,12 @@ namespace Stockfish::GPU
         }
 
         bool isActive;
+        void* stream;  // cudaStream_t
 
-        void* stream;
-
-        WCInstructionBuffer* wcBuffer;
-        WCInstructionBuffer staging;
+        // Instructions are first placed here...
+        InstructionBuffer staging;
+        // ... then copied into here, which is being polled continuously by the GPU.
+        InstructionBuffer* wcBuffer;
 
         // Result is written here by GPU. So that we keep the transfer to 64 bytes, we repurpose
         // result[i] == INT_MIN to mean "not (yet) written", and rely on 4-byte stores (at least) to
@@ -160,24 +166,27 @@ namespace Stockfish::GPU
         alignas(64) volatile int32_t result[16];
 
         // Shared weights
-        WeightsData *weights;
+        const WeightsData *weights;
 
         // Device-side data pointer
         RegisterData *data;
 
-        // Scratch index that this register is equal to, or -1
+        // Scratch index that this register (regA through D) is equal to, or -1
         int regStates[4];
+
+    private:
+        // For kernel debugging
+        std::array<int16_t, L1Size> read_scratch(size_t index) const;
     };
 
 
     class CudaContext
     {
-        void *stream = nullptr;
-        std::mutex streamCreationMtx;
+        void *stream = nullptr;  // cudaStream_t
 
     public:
         RegisterMachine *machines;
-        WCInstructionBuffer* wcBuffers;
+        InstructionBuffer* wcBuffers;
         size_t machineCount;
         std::unique_ptr<WeightsData> weights;
 

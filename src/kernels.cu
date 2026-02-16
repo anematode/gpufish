@@ -29,7 +29,7 @@ namespace Stockfish::GPU
 
     struct ScratchReg
     {
-        int16_t data[L1Size];  // TODO: psqt?
+        int16_t data[L1Size];
     };
 
     // Device-side data that lives only in GPU memory
@@ -51,8 +51,8 @@ namespace Stockfish::GPU
 
         WeightsData(const Eval::NNUE::NetworkBig &big)
         {
-            const Eval::NNUE::BigFeatureTransformer& transformer = big.get_ft();
-            auto sparse_input_buckets = big.get_input_buckets();
+            const Eval::NNUE::BigFeatureTransformer& transformer = big.get_feature_transformer();
+            auto sparse_input_buckets = big.get_sparse_buckets();
 
             auto temp = std::make_unique<Eval::NNUE::BigFeatureTransformer>(transformer);
             temp->unpermute_weights();
@@ -86,7 +86,7 @@ namespace Stockfish::GPU
     };
 
 
-    __device__ bool is_halfka_reg(Reg reg)
+    __device__ static bool is_halfka_reg(Reg reg)
     {
         return reg == A || reg == B;
     }
@@ -103,6 +103,9 @@ namespace Stockfish::GPU
         {
         case Add:
             i1 += i; // we only care about the low 16 bits
+
+            // dp2a.lo.b32 multiplies the 2 16-bit signed halfwords in first arg by the 2 low 8-bit signed bytes in the
+            // second arg. Thus, this extracts the high 16 bits of the operand i and adds them to i2.
             i2 = __dp2a_lo(i, 1 << 8, i2);
             return;
         case Sub:
@@ -121,6 +124,7 @@ namespace Stockfish::GPU
         switch (op)
         {
         case Add:
+            // see above comment -- analogous to __dp2a
             i1 = __dp4a(i, 0x1, i1);
             i2 = __dp4a(i, 0x1 << 8, i2);
             i3 = __dp4a(i, 0x1 << 16, i3);
@@ -151,7 +155,7 @@ namespace Stockfish::GPU
         i |= byte << shamt;
     }
 
-    __global__ void persistent_kernel(RegisterMachine* machines, WCInstructionBuffer* buffers, int num_machines) {
+    __global__ void persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num_machines) {
         unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
         unsigned lane_id = threadIdx.x % ThreadsPerWarp;
 
@@ -159,7 +163,7 @@ namespace Stockfish::GPU
         if (warp_id >= num_machines) return;
 
         RegisterMachine *machine = &machines[warp_id];
-        WCInstructionBuffer* instructionBuffer = &buffers[warp_id];
+        InstructionBuffer* instructionBuffer = &buffers[warp_id];
 
         RegisterData *data = machine->data;
         auto* transformer = machine->weights->transformer;
@@ -423,14 +427,17 @@ default: __builtin_unreachable(); \
         }
     }
 
-    void RegisterMachine::init()
+    RegisterMachine::RegisterMachine(const WeightsData* weights, InstructionBuffer* wcInstructionBuffer)
     {
         cudaStreamCreate((cudaStream_t*) &stream);
         checkError(cudaMalloc(&data, sizeof(RegisterData)));
         checkError(cudaMemset(data, 0, sizeof(RegisterData)));
+
+        this->weights = weights;
+        this->wcBuffer = wcInstructionBuffer;
     }
 
-    void RegisterMachine::deinit()
+    RegisterMachine::~RegisterMachine()
     {
         cudaStreamDestroy((cudaStream_t) stream);
         cudaFree(data);
@@ -439,7 +446,7 @@ default: __builtin_unreachable(); \
         stream = nullptr;
     }
 
-    std::array<int16_t, 1024> RegisterMachine::read_scratch(size_t index)
+    std::array<int16_t, 1024> RegisterMachine::read_scratch(size_t index) const
     {
         // We're not synchronizing with the persistent kernel's stream, so this is shoddy, but this is for debug
         // purposes so we just do this.
@@ -461,17 +468,13 @@ default: __builtin_unreachable(); \
             cudaHostAlloc(&machines, machineCount * sizeof(RegisterMachine), cudaHostAllocMapped)
         );
         checkError(
-            cudaHostAlloc(&wcBuffers, machineCount * sizeof(WCInstructionBuffer), cudaHostAllocMapped | cudaHostAllocWriteCombined)
+            cudaHostAlloc(&wcBuffers, machineCount * sizeof(InstructionBuffer), cudaHostAllocMapped | cudaHostAllocWriteCombined)
         );
 
-        memset(machines, 0, machineCount * sizeof(RegisterMachine));
-        memset(wcBuffers, 0, machineCount * sizeof(WCInstructionBuffer));
-        for (int i = 0; i < machineCount; i++) {
-            RegisterMachine *machine = &machines[i];
+        memset(wcBuffers, 0, machineCount * sizeof(InstructionBuffer));
 
-            machine->init();
-            machine->weights = weights.get();
-            machine->wcBuffer = &wcBuffers[i];
+        for (int i = 0; i < machineCount; i++) {
+            new (&machines[i]) RegisterMachine(weights.get(), &wcBuffers[i]);
         }
     }
 
@@ -507,8 +510,7 @@ default: __builtin_unreachable(); \
 
         for (int i = 0; i < machineCount; i++)
         {
-            machines[i].deinit();
-            cudaFreeHost(machines[i].data);
+            machines[i].~RegisterMachine();
         }
         cudaFreeHost(wcBuffers);
         cudaFree(machines);
@@ -522,7 +524,7 @@ default: __builtin_unreachable(); \
             return;
 
         checkError(cudaStreamCreate((cudaStream_t*) &stream));
-        memset(wcBuffers, 0, machineCount * sizeof(WCInstructionBuffer));
+        memset(wcBuffers, 0, machineCount * sizeof(InstructionBuffer));
 
         int num_warps = machineCount;
         int threads_per_block = 128;

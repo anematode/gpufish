@@ -249,8 +249,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
     constexpr int SharedMemoryBuckets = 4;
 
     __shared__ Eval::NNUE::L1Bucket bucketsShared[SharedMemoryBuckets];
-    int                             sharedBucketOffset =
-      8;  // bucketsShared[i - sharedBucketOffset], if in range, is buckets[i]
+    // bucketsShared[i - sharedBucketOffset], if in range, is buckets[i]
+    int                             sharedBucketOffset = 8;
 
     __shared__ Instruction cmdBuffers[MaxInstructionsCount * 4];
     Instruction*           myCmdBuffer = &cmdBuffers[warp_id % 4];
@@ -288,7 +288,6 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
             case SwitchMachine :
                 break;
             case PreloadL1Buckets : {
-                __syncwarp();
                 sharedBucketOffset = inst.decode_bucket() - SharedMemoryBuckets + 1;
 
                 for (int i = 0; i < SharedMemoryBuckets; ++i)
@@ -446,7 +445,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     bucket = &buckets[bucketIndex];
 
                 int accumulation = lane_id < 16 ? bucket->biases[lane_id] : 0;
-                __syncwarp();
+                
 #pragma unroll
                 for (int j = 0, q = lane_id >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
                 {

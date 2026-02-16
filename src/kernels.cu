@@ -104,11 +104,11 @@ namespace Stockfish::GPU
         {
         case Add:
             i1 += i; // we only care about the low 16 bits
-            i2 += (i >> 16);
+            i2 = __dp2a_lo(i, 1 << 8, i2);
             return;
         case Sub:
             i1 -= i; // we only care about the low 16 bits
-            i2 -= (i >> 16);
+            i2 = __dp2a_lo(i, 0xff << 8, i2);
             return;
         case Store:
             i1 = i;
@@ -139,6 +139,7 @@ namespace Stockfish::GPU
 
     __device__ int pack16(int i1, int i2, int& out)
     {
+        // TODO: check this gets optimized to bfi.b32 or wtv
         out = (i1 & 0xffff) + (unsigned(i2) << 16);
     }
 

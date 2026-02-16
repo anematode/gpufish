@@ -377,7 +377,7 @@ default: __builtin_unreachable(); \
                                 int sum1 = std::clamp(cvt(src1[i+ L1EntriesPerThreadSlice / 2] + src2[i + L1EntriesPerThreadSlice / 2]), 0, 255);
 
                                 insert_byte(packed[offset + i / 4],
-                                    unsigned(__mul24(sum0, sum1)) / 512, i % 4);
+                                    unsigned(sum0 * sum1) / 512, i % 4);
                             }
                         }
 

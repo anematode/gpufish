@@ -4,6 +4,7 @@
 #include <array>
 #include <memory>
 #include <mutex>
+#include <climits>
 
 #include "gpu_defs.h"
 #include "nnue/network.h"
@@ -63,14 +64,86 @@ namespace Stockfish::GPU
     {
         void init();
         void deinit();
-
-        void submit(Instruction instr);
-
-        void flush();
-        void blockUntilComplete();
-        bool ready() const;
-
         std::array<int16_t, L1Size> read_scratch(size_t index);
+
+        void flush()
+        {
+            if (staging.s.instructionCount == 0)
+            {
+                result[0] = 0;  // prevent accidentally waiting
+                return;
+            }
+
+            std::fill_n(result, 16, INT_MIN);
+            staging.flush(wcBuffer);
+            std::fill_n(regStates, 4, -1);
+        }
+
+        void blockUntilComplete()
+        {
+            while (!ready())  // TODO add a "perf counter" for this
+            {
+                asm("pause");
+                /*if (attempts++ >= 1000000)
+                {
+                    std::cout << "Register machine at " << this << " failed to read the result in time!\n";
+                    for (int i = 0; i < staging.instructionCount; i++)
+                    {
+                        std::cout << "Instruction " << i << " " << staging.list[i].to_string() << "\n";
+                    }
+                    abort();
+                }*/
+            }
+
+            staging.s.instructionCount = 0;
+        }
+
+        bool ready() const
+        {
+            return result[0] != INT_MIN;
+        }
+
+        __attribute__((always_inline)) void submit(Instruction instr)
+        {
+#ifndef NDEBUG
+            if (!isActive)
+            {
+                fprintf(stderr, "RegisterMachine is inactive!\n");
+                abort();
+            }
+#endif
+
+            if (staging.s.instructionCount >= MaxInstructionsCount)
+            {
+                // Need an immediate flush before writing the next instruction
+                // Mainly used during setup
+                flush();
+                blockUntilComplete();
+            }
+
+            switch (instr.opcode())
+            {
+            case LdScratch:
+                if (regStates[instr.decode_reg()] == int(instr.decode_wide_index()))
+                {
+                    return;
+                }
+                break;
+            case StScratch:
+                regStates[instr.decode_reg()] = int(instr.decode_wide_index());
+                break;
+            case AddFeature:
+            case SubFeature:
+            case ResetReg:
+                regStates[instr.decode_reg()] = -1;
+                break;
+            default: break;
+            }
+
+            staging.list[staging.s.instructionCount++] = instr;
+        }
+
+
         std::array<int32_t, 16> read_result() const
         {
             std::array<int32_t, 16> r;

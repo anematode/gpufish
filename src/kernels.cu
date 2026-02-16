@@ -224,7 +224,7 @@ default: __builtin_unreachable(); \
             {
                 __syncwarp();
 
-                const Instruction& inst = myCmdBuffer[inst_i];
+                Instruction inst = myCmdBuffer[inst_i];
                 switch (inst.opcode())
                 {
                 case SwitchMachine:

@@ -43,12 +43,14 @@ namespace Stockfish::GPU
         void flush(InstructionBuffer* to)
         {
             memcpy(&to->list, list, sizeof(Instruction) * get_instruction_count());
+            // write to instruction count must occur after
             std::atomic_thread_fence(std::memory_order_release);
 
             data += 0x10000;  // increment ID so GPU can distinguish two payloads with equal instruction counts
             to->data = data;
 
-            // The destination buffer is allocated in write-combining memory, so we use an sfence
+            // The destination buffer is allocated in write-combining memory, so we use an sfence to flush the WC queue
+            // (i.e. this is for perf and not correctness)
 #ifdef __x86_64__
             asm ("sfence");
 #endif

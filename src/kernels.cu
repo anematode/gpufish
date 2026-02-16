@@ -251,7 +251,7 @@ default: __builtin_unreachable(); \
                 {
                 case SwitchMachine:
                     break;
-                case LoadL1Buckets:
+                case PreloadL1Buckets:
                     {
                         __syncwarp();
                         sharedBucketOffset = inst.decode_bucket() - SharedMemoryBuckets + 1;

@@ -39,7 +39,7 @@ namespace Stockfish::GPU
         ResetReg = 7,
         // Copy L1 buckets n:n-4 into shared memory. Should only be called with bucket index >= the bucket index of
         // the root position.
-        LoadL1Buckets = 8,
+        PreloadL1Buckets = 8,
     };
 
     enum Reg
@@ -76,7 +76,7 @@ namespace Stockfish::GPU
                 case AddFeature: result = "AddFeature #" + std::to_string(decode_wide_index()) + reg_to_string(); break;
                 case SubFeature: result = "SubFeature #" + std::to_string(decode_wide_index()) + reg_to_string(); break;
                 case Finalize: result = "Finalize #" + std::to_string(decode_bucket()); break;
-                case LoadL1Buckets: result = "LoadL1Buckets #" + std::to_string(decode_bucket()); break;
+                case PreloadL1Buckets: result = "LoadL1Buckets #" + std::to_string(decode_bucket()); break;
                 case Exit: result = "Exit"; break;
                 default: result = "unknown"; break;
             }
@@ -87,7 +87,7 @@ namespace Stockfish::GPU
         {
             assert(max_bucket >= 0 && max_bucket <= 7);
             return {
-            uint32_t((max_bucket << OpcodeBits) + LoadL1Buckets)
+            uint32_t((max_bucket << OpcodeBits) + PreloadL1Buckets)
             };
         }
 

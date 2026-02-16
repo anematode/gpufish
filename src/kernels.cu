@@ -6,7 +6,6 @@
 
 #include <thread>
 #include <x86gprintrin.h>
-#include <clflushoptintrin.h>
 #include "nnue/network.h"
 
 // Credit: https://stackoverflow.com/a/14038590
@@ -97,7 +96,8 @@ namespace Stockfish::GPU
         Add, Sub, Store
     };
 
-    __device__ void unpack16_to_32(int i, int& i1, int& i2, ReduceOp op)
+    template <ReduceOp op>
+    __device__ void unpack16_to_32(int i, int& i1, int& i2)
     {
         switch (op)
         {
@@ -115,7 +115,8 @@ namespace Stockfish::GPU
         }
     }
 
-    __device__ void unpack8_to_32(int i, int& i1, int& i2, int& i3, int& i4, ReduceOp op)
+    template <ReduceOp op>
+    __device__ void unpack8_to_32(int i, int& i1, int& i2, int& i3, int& i4)
     {
         switch (op)
         {
@@ -176,12 +177,24 @@ namespace Stockfish::GPU
         uint32_t instructionCount = 0, signal = 0;
 
 #define SWITCH_REG(X) switch (inst.decode_reg()) { \
-    case 0: { X(regA); break; } \
-    case 1: { X(regB); break; } \
-    case 2: { X(regC); break; } \
-    case 3: { X(regD); break; } \
+    case 0: { auto& r = regA; X; break; } \
+    case 1: { auto& r = regB; X; break; } \
+    case 2: { auto& r = regC; X; break; } \
+    case 3: { auto& r = regD; X; break; } \
     default: __builtin_unreachable(); \
         };
+
+#define SWITCH_REG_HALFKA(X) switch (inst.decode_reg()) { \
+case 0: { auto& r = regA; X; break; } \
+case 1: { auto& r = regB; X; break; } \
+default: __builtin_unreachable(); \
+};
+
+#define SWITCH_REG_THREATS(X) switch (inst.decode_reg()) { \
+case 2: { auto& r = regC; X; break; } \
+case 3: { auto& r = regD; X; break; } \
+default: __builtin_unreachable(); \
+};
 
         __shared__ Instruction cmdBuffers[MaxInstructionsCount * 4];
         Instruction* myCmdBuffer = &cmdBuffers[warp_id % 4];
@@ -227,23 +240,21 @@ namespace Stockfish::GPU
                     }
                 case LdScratch: {
                         int16_t* scratch = data->get_scratch(inst);
-                        SWITCH_REG([&] (reg_t r)
-                        {
+                        SWITCH_REG({
                             _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 8)
                             {
                                 int4 data = *(int4*)&scratch[i];
-                                unpack16_to_32(data.x, r[j], r[j + 1], Store);
-                                unpack16_to_32(data.y, r[j + 2], r[j + 3], Store);
-                                unpack16_to_32(data.z, r[j + 4], r[j + 5], Store);
-                                unpack16_to_32(data.w, r[j + 6], r[j + 7], Store);
+                                unpack16_to_32<Store>(data.x, r[j], r[j + 1]);
+                                unpack16_to_32<Store>(data.y, r[j + 2], r[j + 3]);
+                                unpack16_to_32<Store>(data.z, r[j + 4], r[j + 5]);
+                                unpack16_to_32<Store>(data.w, r[j + 6], r[j + 7]);
                             }
                         })
                         break;
                 }
                 case StScratch: {
                         int16_t* scratch = data->get_scratch(inst);
-                        SWITCH_REG([&] (reg_t r)
-                        {
+                        SWITCH_REG({
                             _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 8)
                             {
                                 int4 result;
@@ -262,24 +273,22 @@ namespace Stockfish::GPU
                         if (is_halfka_reg(inst.decode_reg()))
                         {
                             const int16_t *weights = &transformer->weights[index * L1Size];
-                            SWITCH_REG([&] (reg_t r)
-                            {
+                            SWITCH_REG_HALFKA({
                                 _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 8) {
                                     int4 data = *(int4*)&weights[i];
-                                    unpack16_to_32(data.x, r[j], r[j + 1], Add);
-                                    unpack16_to_32(data.y, r[j + 2], r[j + 3], Add);
-                                    unpack16_to_32(data.z, r[j + 4], r[j + 5], Add);
-                                    unpack16_to_32(data.w, r[j + 6], r[j + 7], Add);
+                                    unpack16_to_32<Add>(data.x, r[j], r[j + 1]);
+                                    unpack16_to_32<Add>(data.y, r[j + 2], r[j + 3]);
+                                    unpack16_to_32<Add>(data.z, r[j + 4], r[j + 5]);
+                                    unpack16_to_32<Add>(data.w, r[j + 6], r[j + 7]);
                                 }
                             })
                         } else {
                             const int8_t *weights = &transformer->threatWeights[index * L1Size];
-                            SWITCH_REG(([&] (reg_t r)
-                            {
+                            SWITCH_REG_THREATS(({
                                 _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 8) {
                                     int2 data = *(int2*)&weights[i];
-                                    unpack8_to_32(data.x, r[j], r[j + 1], r[j + 2], r[j + 3], Add);
-                                    unpack8_to_32(data.y, r[j + 4], r[j + 5], r[j + 6], r[j + 7], Add);
+                                    unpack8_to_32<Add>(data.x, r[j], r[j + 1], r[j + 2], r[j + 3]);
+                                    unpack8_to_32<Add>(data.y, r[j + 4], r[j + 5], r[j + 6], r[j + 7]);
                                 }
                             }))
                         }
@@ -291,24 +300,22 @@ namespace Stockfish::GPU
                         if (is_halfka_reg(inst.decode_reg()))
                         {
                             const int16_t *weights = &transformer->weights[index * L1Size];
-                            SWITCH_REG([&] (reg_t r)
-                            {
+                            SWITCH_REG_HALFKA({
                                 _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 8) {
                                     int4 data = *(int4*)&weights[i];
-                                    unpack16_to_32(data.x, r[j], r[j + 1], Sub);
-                                    unpack16_to_32(data.y, r[j + 2], r[j + 3], Sub);
-                                    unpack16_to_32(data.z, r[j + 4], r[j + 5], Sub);
-                                    unpack16_to_32(data.w, r[j + 6], r[j + 7], Sub);
+                                    unpack16_to_32<Sub>(data.x, r[j], r[j + 1]);
+                                    unpack16_to_32<Sub>(data.y, r[j + 2], r[j + 3]);
+                                    unpack16_to_32<Sub>(data.z, r[j + 4], r[j + 5]);
+                                    unpack16_to_32<Sub>(data.w, r[j + 6], r[j + 7]);
                                 }
                             })
                         } else {
                             const int8_t *weights = &transformer->threatWeights[index * L1Size];
-                            SWITCH_REG(([&] (reg_t r)
-                            {
+                            SWITCH_REG_THREATS(({
                                 _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 8) {
                                     int2 data = *(int2*)&weights[i];
-                                    unpack8_to_32(data.x, r[j], r[j + 1], r[j + 2], r[j + 3], Sub);
-                                    unpack8_to_32(data.y, r[j + 4], r[j + 5], r[j + 6], r[j + 7], Sub);
+                                    unpack8_to_32<Sub>(data.x, r[j], r[j + 1], r[j + 2], r[j + 3]);
+                                    unpack8_to_32<Sub>(data.y, r[j + 4], r[j + 5], r[j + 6], r[j + 7]);
                                 }
                             }))
                         }
@@ -333,7 +340,8 @@ namespace Stockfish::GPU
                                 int sum0 = std::clamp(cvt(src1[i] + src2[i]), 0, 255);
                                 int sum1 = std::clamp(cvt(src1[i+ L1EntriesPerThreadSlice / 2] + src2[i + L1EntriesPerThreadSlice / 2]), 0, 255);
 
-                                insert_byte(packed[offset + i / 4], unsigned(__mul24(sum0, sum1)) / 512, i % 4);
+                                insert_byte(packed[offset + i / 4],
+                                    unsigned(__mul24(sum0, sum1)) / 512, i % 4);
                             }
                         }
 
@@ -355,6 +363,8 @@ namespace Stockfish::GPU
 #pragma unroll
                         for (int j = 0, q = lane_id >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
                         {
+
+#pragma unroll 1
                             for (int th_i = 0; th_i < ThreadsPerWarp; ++th_i, q += 2)
                             {
                                 int b1 = __shfl_sync(0xFFFFFFFF, packed[j], th_i);
@@ -379,21 +389,19 @@ namespace Stockfish::GPU
                         // Not performance critical, used just for resetting
                         if (is_halfka_reg(inst.decode_reg()))
                         {
-                            SWITCH_REG([&] (reg_t r)
-                            {
+                            SWITCH_REG_HALFKA({
                                 _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 8)
                                 {
                                     int4 data = *(int4*)&transformer->biases.data()[i];
-                                    unpack16_to_32(data.x, r[j + 0], r[j + 1], Store);
-                                    unpack16_to_32(data.y, r[j + 2], r[j + 3], Store);
-                                    unpack16_to_32(data.z, r[j + 4], r[j + 5], Store);
-                                    unpack16_to_32(data.w, r[j + 6], r[j + 7], Store);
+                                    unpack16_to_32<Store>(data.x, r[j + 0], r[j + 1]);
+                                    unpack16_to_32<Store>(data.y, r[j + 2], r[j + 3]);
+                                    unpack16_to_32<Store>(data.z, r[j + 4], r[j + 5]);
+                                    unpack16_to_32<Store>(data.w, r[j + 6], r[j + 7]);
                                 }
                             })
                         } else
                         {
-                            SWITCH_REG([&] (reg_t r)
-                            {
+                            SWITCH_REG_THREATS({
                                 _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++)
                                     r[i] = 0;
                             })

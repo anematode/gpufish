@@ -103,15 +103,15 @@ namespace Stockfish::GPU
         switch (op)
         {
         case Add:
-            i1 += i & 0xffff; // we only care about the low 16 bits
+            i1 += i; // we only care about the low 16 bits
             i2 += (i >> 16);
             return;
         case Sub:
-            i1 -= i & 0xffff; // we only care about the low 16 bits
+            i1 -= i; // we only care about the low 16 bits
             i2 -= (i >> 16);
             return;
         case Store:
-            i1 = i & 0xffff;
+            i1 = i;
             i2 = i >> 16;
         }
     }

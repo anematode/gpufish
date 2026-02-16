@@ -195,6 +195,18 @@ NetworkOutput Network<Arch, Transformer>::evaluate(const Position&   pos,
 
         auto result = worker->registerMachine->read_result();
         const auto positional = network[bucket].propagate_later(result);
+        int32_t buf[16];
+        auto correct = network[bucket].propagate(transformedFeatures, buf);
+
+        if (correct != positional)
+        {
+            std::cout << "correct: " << correct << ' ' << positional << '\n';
+            for (int i = 0; i < 16; ++i)
+            {
+                std::cout << buf[i] << ' ' << result[i] << '\n';
+            }
+            abort();
+        }
         return {static_cast<Value>(psqt / OutputScale), static_cast<Value>(positional / OutputScale)};
     }
 

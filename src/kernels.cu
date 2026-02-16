@@ -332,7 +332,7 @@ namespace Stockfish::GPU
                         };
 
 #pragma unroll
-                        for (int p = 0, k = 0; p < 2; ++p) {
+                        for (int p = 0; p < 2; ++p) {
                             int32_t *src1 = p ? regB : regA;
                             int32_t *src2 = p ? regD : regC;
                             int offset = p * (L1EntriesPerThreadSlice / 8);
@@ -381,6 +381,7 @@ namespace Stockfish::GPU
 
                         if (lane_id < 16)
                             machine->result[lane_id] = accumulation;
+                        __threadfence_system();
                         goto done;
                 }
                 case ResetReg: {
@@ -412,10 +413,12 @@ namespace Stockfish::GPU
                 }
             }
 
+            __syncwarp();
             // Signal to the CPU that we're done with this batch
             if (lane_id == 0)
             {
                 machine->result[0] = 1;
+                __threadfence_system();
             }
 
             done:;

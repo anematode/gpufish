@@ -216,6 +216,7 @@ void Search::Worker::start_searching() {
 
     accumulatorStack.machine = registerMachine;
     registerMachine->submit(GPU::Instruction::reset_reg(GPU::A));
+
     for (auto& r : refreshTable.big.entries)
     {
         for (auto & ent : r)

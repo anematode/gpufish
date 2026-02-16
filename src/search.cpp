@@ -155,7 +155,7 @@ bool is_shuffling(Move move, Stack* const ss, const Position& pos) {
 }  // namespace
 
 Search::Worker::Worker(SharedState&              sharedState,
-                        GPU::RegisterMachine*    machine,
+                       GPU::RegisterMachine*     machine,
                        ISearchManager&           sm,
                        size_t                    threadId,
                        size_t                    workerId,
@@ -655,7 +655,7 @@ void Search::Worker::clear() {
 
     for (auto& r : refreshTable.big.entries)
     {
-        for (auto & ent : r)
+        for (auto& ent : r)
         {
             registerMachine->submit(GPU::Instruction::store_scratch(ent.scratchIndex, GPU::A));
         }

@@ -151,7 +151,7 @@ struct SharedState {
     ThreadPool&                                               threads;
     TranspositionTable&                                       tt;
     std::map<NumaIndex, SharedHistories>&                     sharedHistories;
-    GPU::CudaContext*                         cudaContext;
+    GPU::CudaContext*                                         cudaContext;
     const LazyNumaReplicatedSystemWide<Eval::NNUE::Networks>& networks;
 };
 
@@ -297,7 +297,7 @@ struct CustomStack {
 class Worker {
    public:
     Worker(SharedState&,
-            GPU::RegisterMachine*,
+           GPU::RegisterMachine*,
            ISearchManager&,
            size_t,
            size_t,

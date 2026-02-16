@@ -1032,7 +1032,7 @@ net:
 	@$(SHELL) ../scripts/net.sh
 
 format:
-	$(CLANG-FORMAT) -i $(SRCS) $(HEADERS) -style=file
+	$(CLANG-FORMAT) -i $(SRCS) kernels.cu $(HEADERS) -style=file
 
 ### ==========================================================================
 ### Section 5. Private Targets

@@ -68,11 +68,11 @@ Thread::Thread(Search::SharedState&                    sharedState,
 
         for (int i = 0; i < WorkersPerThread; ++i)
         {
-            size_t idxInCuda = WorkersPerThread * n + i;
-            GPU::RegisterMachine* machine = sharedState.cudaContext->get_machine(idxInCuda);
-            this->workers.push_back(
-              make_unique_large_page<Search::Worker>(sharedState, machine, *searchManager, n, i, idxInNuma,
-                                                     totalNuma, this->numaAccessToken, this));
+            size_t                idxInCuda = WorkersPerThread * n + i;
+            GPU::RegisterMachine* machine   = sharedState.cudaContext->get_machine(idxInCuda);
+            this->workers.push_back(make_unique_large_page<Search::Worker>(
+              sharedState, machine, *searchManager, n, i, idxInNuma, totalNuma,
+              this->numaAccessToken, this));
         }
     });
 
@@ -288,9 +288,11 @@ void ThreadPool::set(const NumaConfig&                           numaConfig,
         auto threadsPerNode = counts;
         counts.clear();
 
-        cudaContext = std::make_unique<GPU::CudaContext>(sharedState.networks->big, requested * WorkersPerThread);
+        cudaContext             = std::make_unique<GPU::CudaContext>(sharedState.networks->big,
+                                                                     requested * WorkersPerThread);
         sharedState.cudaContext = cudaContext.get();
-        cudaContext->launch_persistent_kernel();  // needed for setup -- should probably have non-persistent option for setup
+        cudaContext
+          ->launch_persistent_kernel();  // needed for setup -- should probably have non-persistent option for setup
 
         while (threads.size() < requested)
         {

@@ -41,7 +41,7 @@
 #include "gpu.h"
 
 namespace Stockfish {
-    class Engine {
+class Engine {
    public:
     using InfoShort = Search::InfoShort;
     using InfoFull  = Search::InfoFull;

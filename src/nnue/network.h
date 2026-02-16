@@ -84,16 +84,12 @@ class Network {
 
 
     void verify(std::string evalfilePath, const std::function<void(std::string_view)>&) const;
-    NnueEvalTrace trace_evaluate(const Position&                         pos,
-                                 AccumulatorStack&                       accumulatorStack,
-                                 AccumulatorCaches::Cache<FTDimensions>& cache) const;
-    const Transformer& get_feature_transformer() const
-    {
-        return featureTransformer;
-    }
+    NnueEvalTrace      trace_evaluate(const Position&                         pos,
+                                      AccumulatorStack&                       accumulatorStack,
+                                      AccumulatorCaches::Cache<FTDimensions>& cache) const;
+    const Transformer& get_feature_transformer() const { return featureTransformer; }
 
-    std::vector<const L1Bucket*> get_sparse_buckets() const
-    {
+    std::vector<const L1Bucket*> get_sparse_buckets() const {
         std::vector<const L1Bucket*> result;
         for (const auto& arch : network)
         {
@@ -103,7 +99,7 @@ class Network {
     }
 
 
-private:
+   private:
     void load_user_net(const std::string&, const std::string&);
     void load_internal();
 
@@ -132,7 +128,7 @@ private:
     // Hash value of evaluation function structure
     static constexpr std::uint32_t hash = Transformer::get_hash_value() ^ Arch::get_hash_value();
 
-    template <IndexType Size>
+    template<IndexType Size>
     friend struct AccumulatorCaches::Cache;
 };
 

@@ -77,7 +77,9 @@ void permute(std::array<T, N>& data, const std::array<std::size_t, OrderSize>& o
     }
 }
 
-void prepare_for_finalize(GPU::RegisterMachine* machine, const AccumulatorState<Features::HalfKAv2_hm>& acc, const AccumulatorState<Features::FullThreats>& threatsAcc);
+void prepare_for_finalize(GPU::RegisterMachine*                          machine,
+                          const AccumulatorState<Features::HalfKAv2_hm>& acc,
+                          const AccumulatorState<Features::FullThreats>& threatsAcc);
 
 // Input feature converter
 template<IndexType TransformedFeatureDimensions>
@@ -234,7 +236,7 @@ class FeatureTransformer {
                            AccumulatorCaches::Cache<HalfDimensions>& cache,
                            OutputType*                               output,
                            int                                       bucket,
-                           GPU::RegisterMachine* machine) const {
+                           GPU::RegisterMachine*                     machine) const {
 
         using namespace SIMD;
         accumulatorStack.evaluate(pos, *this, cache);

@@ -326,7 +326,7 @@ struct AccumulatorUpdateContext {
     const FeatureTransformer<Dimensions>& featureTransformer;
     const AccumulatorState<FeatureSet>&   from;
     AccumulatorState<FeatureSet>&         to;
-    GPU::RegisterMachine* machine;
+    GPU::RegisterMachine*                 machine;
 
     template<UpdateOperation... ops,
              typename... Ts,
@@ -360,8 +360,9 @@ struct AccumulatorUpdateContext {
 
     void apply(const typename FeatureSet::IndexList& added,
                const typename FeatureSet::IndexList& removed) {
-        [[maybe_unused]] const auto& fromAcc = from.template acc<Dimensions>().accumulation[perspective];
-        [[maybe_unused]] auto&       toAcc   = to.template acc<Dimensions>().accumulation[perspective];
+        [[maybe_unused]] const auto& fromAcc =
+          from.template acc<Dimensions>().accumulation[perspective];
+        [[maybe_unused]] auto& toAcc = to.template acc<Dimensions>().accumulation[perspective];
 
         const auto& fromPsqtAcc = from.template acc<Dimensions>().psqtAccumulation[perspective];
         auto&       toPsqtAcc   = to.template acc<Dimensions>().psqtAccumulation[perspective];
@@ -378,10 +379,10 @@ struct AccumulatorUpdateContext {
 
 #ifdef VECTOR
         using Tiling = SIMDTiling<Dimensions, Dimensions, PSQTBuckets>;
-        [[maybe_unused]] vec_t      acc[Tiling::NumRegs];
-        psqt_vec_t psqt[Tiling::NumPsqtRegs];
+        [[maybe_unused]] vec_t acc[Tiling::NumRegs];
+        psqt_vec_t             psqt[Tiling::NumPsqtRegs];
 
-#ifndef NO_CPU_EVAL
+    #ifndef NO_CPU_EVAL
         const auto* threatWeights = &featureTransformer.threatWeights[0];
 
         for (IndexType j = 0; j < Dimensions / Tiling::TileHeight; ++j)
@@ -398,16 +399,16 @@ struct AccumulatorUpdateContext {
                 const size_t offset = Dimensions * index;
                 auto*        column = reinterpret_cast<const vec_i8_t*>(&threatWeights[offset]);
 
-    #ifdef USE_NEON
+        #ifdef USE_NEON
                 for (IndexType k = 0; k < Tiling::NumRegs; k += 2)
                 {
                     acc[k]     = vec_sub_16(acc[k], vmovl_s8(vget_low_s8(column[k / 2])));
                     acc[k + 1] = vec_sub_16(acc[k + 1], vmovl_high_s8(column[k / 2]));
                 }
-    #else
+        #else
                 for (IndexType k = 0; k < Tiling::NumRegs; ++k)
                     acc[k] = vec_sub_16(acc[k], vec_convert_8_16(column[k]));
-    #endif
+        #endif
             }
 
             for (int i = 0; i < added.ssize(); ++i)
@@ -416,16 +417,16 @@ struct AccumulatorUpdateContext {
                 const size_t offset = Dimensions * index;
                 auto*        column = reinterpret_cast<const vec_i8_t*>(&threatWeights[offset]);
 
-    #ifdef USE_NEON
+        #ifdef USE_NEON
                 for (IndexType k = 0; k < Tiling::NumRegs; k += 2)
                 {
                     acc[k]     = vec_add_16(acc[k], vmovl_s8(vget_low_s8(column[k / 2])));
                     acc[k + 1] = vec_add_16(acc[k + 1], vmovl_high_s8(column[k / 2]));
                 }
-    #else
+        #else
                 for (IndexType k = 0; k < Tiling::NumRegs; ++k)
                     acc[k] = vec_add_16(acc[k], vec_convert_8_16(column[k]));
-    #endif
+        #endif
             }
 
             for (IndexType k = 0; k < Tiling::NumRegs; k++)
@@ -434,7 +435,7 @@ struct AccumulatorUpdateContext {
             threatWeights += Tiling::TileHeight;
         }
 
-#endif
+    #endif
 
         for (IndexType j = 0; j < PSQTBuckets / Tiling::PsqtTileHeight; ++j)
         {
@@ -508,9 +509,9 @@ auto make_accumulator_update_context(Color                                 persp
                                      const FeatureTransformer<Dimensions>& featureTransformer,
                                      const AccumulatorState<FeatureSet>&   accumulatorFrom,
                                      AccumulatorState<FeatureSet>&         accumulatorTo,
-                                     GPU::RegisterMachine* machine) noexcept {
-    return AccumulatorUpdateContext<FeatureSet, Dimensions>{perspective, featureTransformer,
-                                                            accumulatorFrom, accumulatorTo, machine};
+                                     GPU::RegisterMachine*                 machine) noexcept {
+    return AccumulatorUpdateContext<FeatureSet, Dimensions>{
+      perspective, featureTransformer, accumulatorFrom, accumulatorTo, machine};
 }
 
 template<IndexType TransformedFeatureDimensions>
@@ -520,7 +521,7 @@ void double_inc_update(Color                                                   p
                        AccumulatorState<PSQFeatureSet>&                        middle_state,
                        AccumulatorState<PSQFeatureSet>&                        target_state,
                        const AccumulatorState<PSQFeatureSet>&                  computed,
-                       GPU::RegisterMachine* machine) {
+                       GPU::RegisterMachine*                                   machine) {
 
     assert(computed.acc<TransformedFeatureDimensions>().computed[perspective]);
     assert(!middle_state.acc<TransformedFeatureDimensions>().computed[perspective]);
@@ -542,8 +543,8 @@ void double_inc_update(Color                                                   p
     sf_assume(added.size() == 1);
     sf_assume(removed.size() == 2 || removed.size() == 3);
 
-    auto updateContext =
-      make_accumulator_update_context(perspective, featureTransformer, computed, target_state, machine);
+    auto updateContext = make_accumulator_update_context(perspective, featureTransformer, computed,
+                                                         target_state, machine);
 
     if (removed.size() == 2)
     {
@@ -566,7 +567,7 @@ void double_inc_update(Color                                                   p
                        AccumulatorState<ThreatFeatureSet>&                     target_state,
                        const AccumulatorState<ThreatFeatureSet>&               computed,
                        const DirtyPiece&                                       dp2,
-                       GPU::RegisterMachine* machine) {
+                       GPU::RegisterMachine*                                   machine) {
 
     assert(computed.acc<TransformedFeatureDimensions>().computed[perspective]);
     assert(!middle_state.acc<TransformedFeatureDimensions>().computed[perspective]);
@@ -582,8 +583,8 @@ void double_inc_update(Color                                                   p
     ThreatFeatureSet::append_changed_indices(perspective, ksq, target_state.diff, removed, added,
                                              &fusedData, false);
 
-    auto updateContext =
-      make_accumulator_update_context(perspective, featureTransformer, computed, target_state, machine);
+    auto updateContext = make_accumulator_update_context(perspective, featureTransformer, computed,
+                                                         target_state, machine);
 
     updateContext.apply(added, removed);
 
@@ -597,7 +598,7 @@ void update_accumulator_incremental(
   const Square                                            ksq,
   AccumulatorState<FeatureSet>&                           target_state,
   const AccumulatorState<FeatureSet>&                     computed,
-  GPU::RegisterMachine* machine) {
+  GPU::RegisterMachine*                                   machine) {
 
     assert((computed.template acc<TransformedFeatureDimensions>()).computed[perspective]);
     assert(!(target_state.template acc<TransformedFeatureDimensions>()).computed[perspective]);
@@ -614,8 +615,8 @@ void update_accumulator_incremental(
     else
         FeatureSet::append_changed_indices(perspective, ksq, computed.diff, added, removed);
 
-    auto updateContext =
-      make_accumulator_update_context(perspective, featureTransformer, computed, target_state, machine);
+    auto updateContext = make_accumulator_update_context(perspective, featureTransformer, computed,
+                                                         target_state, machine);
 
     if constexpr (std::is_same_v<FeatureSet, ThreatFeatureSet>)
         updateContext.apply(added, removed);
@@ -701,7 +702,7 @@ void update_accumulator_refresh_cache(Color                                 pers
                                       const Position&                       pos,
                                       AccumulatorState<PSQFeatureSet>&      accumulatorState,
                                       AccumulatorCaches::Cache<Dimensions>& cache,
-                                      GPU::RegisterMachine* machine) {
+                                      GPU::RegisterMachine*                 machine) {
 
     using Tiling [[maybe_unused]] = SIMDTiling<Dimensions, Dimensions, PSQTBuckets>;
 
@@ -732,19 +733,20 @@ void update_accumulator_refresh_cache(Color                                 pers
 
     GPU::Reg reg = perspective == WHITE ? GPU::Reg::A : GPU::Reg::B;
     machine->submit(GPU::Instruction::load_scratch(reg, entry.scratchIndex));
-    for (auto index: added)
+    for (auto index : added)
         machine->submit(GPU::Instruction::add_feature(reg, index));
-    for (auto index: removed)
+    for (auto index : removed)
         machine->submit(GPU::Instruction::sub_feature(reg, index));
     machine->submit(GPU::Instruction::store_scratch(entry.scratchIndex, reg));
-    machine->submit(GPU::Instruction::store_scratch(accumulatorState.scratchSlot[perspective], reg));
+    machine->submit(
+      GPU::Instruction::store_scratch(accumulatorState.scratchSlot[perspective], reg));
 
 #ifdef VECTOR
-    [[maybe_unused]] vec_t      acc[Tiling::NumRegs];
-    psqt_vec_t psqt[Tiling::NumPsqtRegs];
+    [[maybe_unused]] vec_t acc[Tiling::NumRegs];
+    psqt_vec_t             psqt[Tiling::NumPsqtRegs];
 
 
-#ifndef NO_CPU_EVAL
+    #ifndef NO_CPU_EVAL
     const auto* weights = &featureTransformer.weights[0];
 
     for (IndexType j = 0; j < Dimensions / Tiling::TileHeight; ++j)
@@ -795,7 +797,7 @@ void update_accumulator_refresh_cache(Color                                 pers
 
         weights += Tiling::TileHeight;
     }
-#endif
+    #endif
 
     for (IndexType j = 0; j < PSQTBuckets / Tiling::PsqtTileHeight; ++j)
     {
@@ -867,8 +869,7 @@ void update_threats_accumulator_full(Color                                 persp
                                      const FeatureTransformer<Dimensions>& featureTransformer,
                                      const Position&                       pos,
                                      AccumulatorState<ThreatFeatureSet>&   accumulatorState,
-                                     GPU::RegisterMachine* machine)
-{
+                                     GPU::RegisterMachine*                 machine) {
     using Tiling [[maybe_unused]] = SIMDTiling<Dimensions, Dimensions, PSQTBuckets>;
 
     ThreatFeatureSet::IndexList active;
@@ -883,13 +884,14 @@ void update_threats_accumulator_full(Color                                 persp
     {
         machine->submit(GPU::Instruction::add_feature(reg, i));
     }
-    machine->submit(GPU::Instruction::store_scratch(accumulatorState.scratchSlot[perspective], reg));
+    machine->submit(
+      GPU::Instruction::store_scratch(accumulatorState.scratchSlot[perspective], reg));
 
 #ifdef VECTOR
-    [[maybe_unused]] vec_t      acc[Tiling::NumRegs];
-    psqt_vec_t psqt[Tiling::NumPsqtRegs];
+    [[maybe_unused]] vec_t acc[Tiling::NumRegs];
+    psqt_vec_t             psqt[Tiling::NumPsqtRegs];
 
-#ifndef NO_CPU_EVAL
+    #ifndef NO_CPU_EVAL
     const auto* threatWeights = &featureTransformer.threatWeights[0];
 
     for (IndexType j = 0; j < Dimensions / Tiling::TileHeight; ++j)
@@ -908,16 +910,16 @@ void update_threats_accumulator_full(Color                                 persp
             const size_t offset = Dimensions * index;
             auto*        column = reinterpret_cast<const vec_i8_t*>(&threatWeights[offset]);
 
-#ifdef USE_NEON
+        #ifdef USE_NEON
             for (IndexType k = 0; k < Tiling::NumRegs; k += 2)
             {
                 acc[k]     = vec_add_16(acc[k], vmovl_s8(vget_low_s8(column[k / 2])));
                 acc[k + 1] = vec_add_16(acc[k + 1], vmovl_high_s8(column[k / 2]));
             }
-#else
+        #else
             for (IndexType k = 0; k < Tiling::NumRegs; ++k)
                 acc[k] = vec_add_16(acc[k], vec_convert_8_16(column[k]));
-#endif
+        #endif
         }
 
         for (IndexType k = 0; k < Tiling::NumRegs; k++)
@@ -926,7 +928,7 @@ void update_threats_accumulator_full(Color                                 persp
         threatWeights += Tiling::TileHeight;
     }
 
-#endif
+    #endif
 
     for (IndexType j = 0; j < PSQTBuckets / Tiling::PsqtTileHeight; ++j)
     {
@@ -977,8 +979,9 @@ void update_threats_accumulator_full(Color                                 persp
 
 }
 
-void prepare_for_finalize(GPU::RegisterMachine* machine, const AccumulatorState<Features::HalfKAv2_hm>& acc, const AccumulatorState<Features::FullThreats>& threatsAcc)
-{
+void prepare_for_finalize(GPU::RegisterMachine*                          machine,
+                          const AccumulatorState<Features::HalfKAv2_hm>& acc,
+                          const AccumulatorState<Features::FullThreats>& threatsAcc) {
     machine->submit(GPU::Instruction::load_scratch(GPU::A, acc.scratchSlot[0]));
     machine->submit(GPU::Instruction::load_scratch(GPU::B, acc.scratchSlot[1]));
     machine->submit(GPU::Instruction::load_scratch(GPU::C, threatsAcc.scratchSlot[0]));

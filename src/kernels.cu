@@ -85,12 +85,11 @@ struct WeightsData {
 
 // GPU-side, collectively managed by warps to perform work stealing. Important data members are also hoisted here
 // to avoid expensive host accesses.
-struct CachedMachineInfo
-{
-    int warp_id;
+struct CachedMachineInfo {
+    int      warp_id;
     uint32_t last_buffer_header;  // used to distinguish a new header
 
-    RegisterData* regData;
+    RegisterData*      regData;
     InstructionBuffer* wcBuffer;
 };
 
@@ -160,20 +159,20 @@ __device__ void insert_byte(unsigned& i, int byte, int offset) {
 
 constexpr int NO_WARP = -1;
 
-__global__ void setup_machine_info(const RegisterMachine* machines, CachedMachineInfo* machine_infos,
-                                   int num_machines)
-{
+__global__ void setup_machine_info(const RegisterMachine* machines,
+                                   CachedMachineInfo*     machine_infos,
+                                   int                    num_machines) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_machines)
         return;
 
-    const RegisterMachine& source = machines[idx];
-    CachedMachineInfo& destination = machine_infos[idx];
+    const RegisterMachine& source      = machines[idx];
+    CachedMachineInfo&     destination = machine_infos[idx];
 
-    destination.warp_id = NO_WARP;
-    destination.wcBuffer = source.wcBuffer;
+    destination.warp_id            = NO_WARP;
+    destination.wcBuffer           = source.wcBuffer;
     destination.last_buffer_header = 0;
-    destination.regData = source.regData;
+    destination.regData            = source.regData;
 }
 
 __device__ void
@@ -199,12 +198,12 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
         return;
 
     // All are the same, so just use the first one
-    auto*         transformer = machines[0].weights->transformer;
-    auto*         buckets     = machines[0].weights->buckets;
+    auto* transformer = machines[0].weights->transformer;
+    auto* buckets     = machines[0].weights->buckets;
 
     RegisterMachine*   machine           = &machines[warp_id];
     InstructionBuffer* instructionBuffer = machine_infos[warp_id].wcBuffer;
-    RegisterData* regData        = machine_infos[warp_id].regData;
+    RegisterData*      regData           = machine_infos[warp_id].regData;
 
     typedef int reg_t[PtxRegsPerThreadSlice];
     reg_t       regA, regB, regC, regD;
@@ -282,7 +281,7 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
 
     __shared__ Eval::NNUE::L1Bucket bucketsShared[SharedMemoryBuckets];
     // bucketsShared[i - sharedBucketOffset], if in range, is buckets[i]
-    int                             sharedBucketOffset = 8;
+    int sharedBucketOffset = 8;
 
     __shared__ Instruction cmdBuffers[MaxInstructionsCount * 4];
     Instruction*           myCmdBuffer = &cmdBuffers[warp_id % 4];
@@ -475,7 +474,7 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
                     bucket = &buckets[bucketIndex];
 
                 int accumulation = lane_id < 16 ? bucket->biases[lane_id] : 0;
-                
+
 #pragma unroll
                 for (int j = 0, q = lane_id >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
                 {
@@ -557,7 +556,7 @@ RegisterMachine::RegisterMachine(const WeightsData* weights,
 RegisterMachine::~RegisterMachine() {
     cudaStreamDestroy((cudaStream_t) stream);
     cudaFree(regData);
-    regData     = nullptr;
+    regData  = nullptr;
     wcBuffer = nullptr;
     stream   = nullptr;
 }
@@ -571,8 +570,8 @@ std::array<int16_t, 1024> RegisterMachine::read_scratch(size_t index) const {
     std::fill(array.begin(), array.end(), 5);
     cudaStream_t stream;
     checkError(cudaStreamCreate(&stream));
-    checkError(
-      cudaMemcpyAsync(&array, &regData->regs[index], sizeof(array), cudaMemcpyDeviceToHost, stream));
+    checkError(cudaMemcpyAsync(&array, &regData->regs[index], sizeof(array), cudaMemcpyDeviceToHost,
+                               stream));
     checkError(cudaStreamSynchronize(stream));
     checkError(cudaStreamDestroy(stream));
     return array;
@@ -627,8 +626,8 @@ CudaContext::~CudaContext() {
     cudaFreeHost(wcBuffers);
     cudaFree(machineInfos);
     cudaFree(machines);
-    machines  = nullptr;
-    wcBuffers = nullptr;
+    machines     = nullptr;
+    wcBuffers    = nullptr;
     machineInfos = nullptr;
 }
 

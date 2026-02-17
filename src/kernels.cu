@@ -106,37 +106,42 @@ __device__ inline void unpack_info(unsigned long long packed, int& warp_id, uint
     last_id = (uint32_t)(packed >> 32);
 }
 
-__device__ int claim_info(CachedMachineInfo* arr, uint32_t& header, int arrCount, int myWarpId) {
-    while (true) {
-        for (int i = 0; i < arrCount; ++i) {
-            auto* as64 = reinterpret_cast<unsigned long long*>(&arr[i]);
-            auto currentPacked = *const_cast<volatile unsigned long long*>(as64);
+__device__ int claim_info(CachedMachineInfo* arr, uint32_t& header, int arrCount, int previousMachine, int myWarpId) {
+    int i = previousMachine;
 
-            int currentWarp;
-            uint32_t lastHeader;
-            unpack_info(currentPacked, currentWarp, lastHeader);
-
-            header = *reinterpret_cast<volatile uint32_t*>(&arr->wcBuffer->header);
-
-            if (currentWarp == NO_WARP && lastHeader != header) {
-                unsigned long long newPacked = pack_info(myWarpId, lastHeader);
-
-                if (atomicCAS(as64, currentPacked, newPacked) == currentPacked)
-                    // Success
-                    return i;
-            }
+    for (;;) {
+        i++;
+        if (i >= arrCount)  // wrap around
+        {
+            i = 0;
+            __nanosleep(50);  // TODO: implement some sort of backoff?
         }
 
-        __nanosleep(50);
+        auto* as64 = reinterpret_cast<unsigned long long*>(&arr[i]);
+        auto currentPacked = *const_cast<volatile unsigned long long*>(as64);
+
+        int currentWarp;
+        uint32_t lastHeader;
+        unpack_info(currentPacked, currentWarp, lastHeader);
+
+        header = *reinterpret_cast<volatile uint32_t*>(&arr->wcBuffer->header);
+
+        if (currentWarp == NO_WARP && lastHeader != header) {
+            unsigned long long newPacked = pack_info(myWarpId, lastHeader);
+
+            if (atomicCAS(as64, currentPacked, newPacked) == currentPacked)
+                // Success
+                return i;
+        }
     }
 }
 
 __device__ void release_info(CachedMachineInfo* arr, int i, uint32_t header)
 {
-    unsigned long long* as64 = reinterpret_cast<unsigned long long*>(&arr[i]);
+    auto* as64 = reinterpret_cast<volatile unsigned long long*>(&arr[i]);
     unsigned long long releasedPacked = pack_info(-1, header);
 
-    atomicExch(as64, releasedPacked);
+    *as64 = releasedPacked;
 }
 
 
@@ -232,6 +237,69 @@ parallel_copy(Eval::NNUE::L1Bucket& dest, const Eval::NNUE::L1Bucket& src, unsig
     }
 }
 
+
+#define SWITCH_REG(X) \
+switch (inst.decode_reg()) \
+{ \
+case 0 : { \
+auto& r = regA; \
+X; \
+break; \
+} \
+case 1 : { \
+auto& r = regB; \
+X; \
+break; \
+} \
+case 2 : { \
+auto& r = regC; \
+X; \
+break; \
+} \
+case 3 : { \
+auto& r = regD; \
+X; \
+break; \
+} \
+default : \
+__builtin_unreachable(); \
+};
+
+#define SWITCH_REG_HALFKA(X) \
+switch (inst.decode_reg()) \
+{ \
+case 0 : { \
+auto& r = regA; \
+X; \
+break; \
+} \
+case 1 : { \
+auto& r = regB; \
+X; \
+break; \
+} \
+default : \
+__builtin_unreachable(); \
+};
+
+#define SWITCH_REG_THREATS(X) \
+switch (inst.decode_reg()) \
+{ \
+case 2 : { \
+auto& r = regC; \
+X; \
+break; \
+} \
+case 3 : { \
+auto& r = regD; \
+X; \
+break; \
+} \
+default : \
+__builtin_unreachable(); \
+};
+
+
 __global__ void
 persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, int num_machines) {
     unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
@@ -257,69 +325,7 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
     // To achieve good memory coalescing patterns, we implement the following indexing:
     // reg[i:i+7] = weights[myL1Offset+PtxRegsPerThreadSize/8*i:myL1Offset+PtxRegsPerThreadSize/8*i+7]
 
-    uint32_t instructionCount = 0, signal = 0;
-
-#define SWITCH_REG(X) \
-    switch (inst.decode_reg()) \
-    { \
-    case 0 : { \
-        auto& r = regA; \
-        X; \
-        break; \
-    } \
-    case 1 : { \
-        auto& r = regB; \
-        X; \
-        break; \
-    } \
-    case 2 : { \
-        auto& r = regC; \
-        X; \
-        break; \
-    } \
-    case 3 : { \
-        auto& r = regD; \
-        X; \
-        break; \
-    } \
-    default : \
-        __builtin_unreachable(); \
-    };
-
-#define SWITCH_REG_HALFKA(X) \
-    switch (inst.decode_reg()) \
-    { \
-    case 0 : { \
-        auto& r = regA; \
-        X; \
-        break; \
-    } \
-    case 1 : { \
-        auto& r = regB; \
-        X; \
-        break; \
-    } \
-    default : \
-        __builtin_unreachable(); \
-    };
-
-#define SWITCH_REG_THREATS(X) \
-    switch (inst.decode_reg()) \
-    { \
-    case 2 : { \
-        auto& r = regC; \
-        X; \
-        break; \
-    } \
-    case 3 : { \
-        auto& r = regD; \
-        X; \
-        break; \
-    } \
-    default : \
-        __builtin_unreachable(); \
-    };
-
+    uint32_t instructionCount = 0;
     constexpr int SharedMemoryBuckets = 4;
 
     __shared__ Eval::NNUE::L1Bucket bucketsShared[SharedMemoryBuckets];
@@ -342,7 +348,7 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
                 release_info(machine_infos, machine_id, header);
             }
 
-            machine_id = claim_info(machine_infos, header, num_machines, warp_id);
+            machine_id = claim_info(machine_infos, header, num_machines, machine_id, warp_id);
             instructionCount = header & 0xffff;
         }
 

@@ -13,6 +13,7 @@ namespace Stockfish::GPU {
 // (Forward decls)
 struct WeightsData;
 struct RegisterData;
+struct CachedMachineInfo;
 
 // May be allocated in pinned host WC memory; instructions are copied CPU-side from the staging buffer. The GPU
 // polls the instructionCount to know when to start stepping. The instruction count should always be
@@ -20,19 +21,19 @@ struct RegisterData;
 struct alignas(64) InstructionBuffer {
     // Low 16 bits are the instruction count; upper 16 bits are an id that serve to tell the GPU
     // that the buffer has been updated.
-    uint32_t    data;
+    uint32_t    header;
     Instruction list[MaxInstructionsCount];
     char        padding[64];
 
     int get_instruction_count() const {
         uint16_t val;
-        memcpy(&val, &data, 2);
+        memcpy(&val, &header, 2);
         return val;
     }
 
     void set_instruction_count(uint16_t count) {
         assert(get_instruction_count() < MaxInstructionsCount);
-        memcpy(&data, &count, 2);
+        memcpy(&header, &count, 2);
     }
 
 
@@ -41,9 +42,9 @@ struct alignas(64) InstructionBuffer {
         // write to instruction count must occur after
         std::atomic_thread_fence(std::memory_order_release);
 
-        data +=
-          0x10000;  // increment ID so GPU can distinguish two payloads with equal instruction counts
-        to->data = data;
+        // increment ID so GPU can distinguish two payloads with equal instruction counts
+        header += 0x10000;
+        to->header = header;
 
         // The destination buffer is allocated in write-combining memory, so we use an sfence to flush the WC queue
         // (i.e. this is for perf and not correctness)
@@ -188,6 +189,7 @@ class CudaContext {
    private:
     void*                        stream = nullptr;  // cudaStream_t
     RegisterMachine*             machines;
+    CachedMachineInfo*           machineInfos;
     InstructionBuffer*           wcBuffers;
     size_t                       machineCount;
     std::unique_ptr<WeightsData> weights;

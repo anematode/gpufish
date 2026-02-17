@@ -6,6 +6,8 @@
 
 #include <thread>
 #include <x86gprintrin.h>
+
+#include "engine.h"
 #include "nnue/network.h"
 
 // Credit: https://stackoverflow.com/a/14038590
@@ -79,6 +81,17 @@ struct WeightsData {
         checkError(cudaFree(buckets));
         buckets = nullptr;
     }
+};
+
+// GPU-side, collectively managed by warps to perform work stealing. Important data members are also hoisted here
+// to avoid expensive host accesses.
+struct CachedMachineInfo
+{
+    int warp_id;
+    uint32_t last_buffer_header;  // used to distinguish a new header
+
+    RegisterData* data;
+    InstructionBuffer* wcBuffer;
 };
 
 
@@ -261,7 +274,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
         if (lane_id == 0)
         {
             uint32_t temp;
-            while ((temp = *(volatile uint32_t*) &instructionBuffer->data) == signal)
+            while ((temp = *(volatile uint32_t*) &instructionBuffer->header) == signal)
             {
                 __nanosleep(50);  // TODO better approach here?
             }
@@ -555,6 +568,7 @@ CudaContext::CudaContext(const Eval::NNUE::NetworkBig& big, size_t machineCount)
       cudaHostAlloc(&machines, machineCount * sizeof(RegisterMachine), cudaHostAllocMapped));
     checkError(cudaHostAlloc(&wcBuffers, machineCount * sizeof(InstructionBuffer),
                              cudaHostAllocMapped | cudaHostAllocWriteCombined));
+    checkError(cudaMalloc(&machineInfos, sizeof(CachedMachineInfo) * machineCount));
 
     memset(wcBuffers, 0, machineCount * sizeof(InstructionBuffer));
 
@@ -596,6 +610,7 @@ CudaContext::~CudaContext() {
         machines[i].~RegisterMachine();
     }
     cudaFreeHost(wcBuffers);
+    cudaFree(machineInfos);
     cudaFree(machines);
     machines  = nullptr;
     wcBuffers = nullptr;

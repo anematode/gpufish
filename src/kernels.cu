@@ -126,7 +126,7 @@ __device__ int claim_info(
         uint32_t lastHeader;
         unpack_info(currentPacked, currentWarp, lastHeader);
 
-        header = *reinterpret_cast<volatile uint32_t*>(&arr->wcBuffer->header);
+        header = *reinterpret_cast<volatile uint32_t*>(&arr[i].wcBuffer->header);
 
         if (currentWarp == NO_WARP && lastHeader != header)
         {
@@ -364,13 +364,12 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
 
         __syncwarp();
         instructionCount = __shfl_sync(0xFFFFFFFF, instructionCount, 0);
+        machine_id = __shfl_sync(0xFFFFFFFF, machine_id, 0);
 
         if (instructionCount == MachineStopHeader)
         {
             return;
         }
-
-        machine_id = __shfl_sync(0xFFFFFFFF, machine_id, 0);
 
         machine           = &machines[machine_id];
         regData           = machine_infos[machine_id].regData;

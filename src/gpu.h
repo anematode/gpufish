@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <climits>
+#include <c++/12/thread>
 
 #include "gpu_defs.h"
 #include "nnue/network.h"

@@ -34,8 +34,6 @@ enum Opcode {
     SubFeature = 4,
     // output_buf = sparse_matrix_multiply(M[bucket], pairwise_fuse((A + C), (B + D)))
     Finalize = 5,
-    // Exit instruction loop
-    Exit = 6,
     // Fill register with biases
     ResetReg = 7,
     // Copy L1 buckets n:n-4 into shared memory. Should only be called with bucket index >= the bucket index of
@@ -91,9 +89,6 @@ struct Instruction {
             break;
         case PreloadL1Buckets :
             result = "LoadL1Buckets #" + std::to_string(decode_bucket());
-            break;
-        case Exit :
-            result = "Exit";
             break;
         default :
             result = "unknown";
@@ -152,8 +147,6 @@ struct Instruction {
         return {
           uint32_t((stm << (OpcodeBits + BucketBits)) + (bucketIdx << OpcodeBits) + Finalize)};
     }
-
-    static constexpr Instruction stop() { return {Exit}; }
 
     constexpr Opcode opcode() const { return Opcode(data & ((1 << OpcodeBits) - 1)); }
 

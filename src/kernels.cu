@@ -110,13 +110,13 @@ __device__ int claim_info(
   CachedMachineInfo* arr, uint32_t& header, int arrCount, int previousMachine, int myWarpId) {
     int i = previousMachine;
 
+    int delay = 5;
     for (;;)
     {
         i++;
         if (i >= arrCount)  // wrap around
         {
             i = 0;
-            __nanosleep(50);  // TODO: implement some sort of backoff?
         }
 
         auto* as64          = reinterpret_cast<unsigned long long*>(&arr[i]);
@@ -135,6 +135,14 @@ __device__ int claim_info(
             if (atomicCAS(as64, currentPacked, newPacked) == currentPacked)
                 // Success
                 return i;
+        }
+
+        if (i == previousMachine)
+        {
+            __nanosleep(delay);
+            delay *= 2;
+            const int MAX_DELAY = 1000;
+            if (delay > MAX_DELAY) delay = MAX_DELAY;
         }
     }
 }

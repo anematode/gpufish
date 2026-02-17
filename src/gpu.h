@@ -168,7 +168,7 @@ struct RegisterMachine {
     const WeightsData* weights;
 
     // Device-side data pointer
-    RegisterData* data;
+    RegisterData* regData;
 
     // Scratch index that this register (regA through D) is equal to, or -1
     int regStates[4];

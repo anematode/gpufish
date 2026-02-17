@@ -90,7 +90,7 @@ struct CachedMachineInfo
     int warp_id;
     uint32_t last_buffer_header;  // used to distinguish a new header
 
-    RegisterData* data;
+    RegisterData* regData;
     InstructionBuffer* wcBuffer;
 };
 
@@ -158,6 +158,24 @@ __device__ void insert_byte(unsigned& i, int byte, int offset) {
     i |= byte << shamt;
 }
 
+constexpr int NO_WARP = -1;
+
+__global__ void setup_machine_info(const RegisterMachine* machines, CachedMachineInfo* machine_infos,
+                                   int num_machines)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= num_machines)
+        return;
+
+    const RegisterMachine& source = machines[idx];
+    CachedMachineInfo& destination = machine_infos[idx];
+
+    destination.warp_id = NO_WARP;
+    destination.wcBuffer = source.wcBuffer;
+    destination.last_buffer_header = 0;
+    destination.regData = source.regData;
+}
+
 __device__ void
 parallel_copy(Eval::NNUE::L1Bucket& dest, const Eval::NNUE::L1Bucket& src, unsigned lane_id) {
     using u32    = uint32_t __attribute__((may_alias));
@@ -172,7 +190,7 @@ parallel_copy(Eval::NNUE::L1Bucket& dest, const Eval::NNUE::L1Bucket& src, unsig
 }
 
 __global__ void
-persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num_machines) {
+persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, int num_machines) {
     unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
     unsigned lane_id = threadIdx.x % ThreadsPerWarp;
 
@@ -180,12 +198,13 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
     if (warp_id >= num_machines)
         return;
 
-    RegisterMachine*   machine           = &machines[warp_id];
-    InstructionBuffer* instructionBuffer = &buffers[warp_id];
+    // All are the same, so just use the first one
+    auto*         transformer = machines[0].weights->transformer;
+    auto*         buckets     = machines[0].weights->buckets;
 
-    RegisterData* data        = machine->data;
-    auto*         transformer = machine->weights->transformer;
-    auto*         buckets     = machine->weights->buckets;
+    RegisterMachine*   machine           = &machines[warp_id];
+    InstructionBuffer* instructionBuffer = machine_infos[warp_id].wcBuffer;
+    RegisterData* regData        = machine_infos[warp_id].regData;
 
     typedef int reg_t[PtxRegsPerThreadSlice];
     reg_t       regA, regB, regC, regD;
@@ -320,7 +339,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 break;
             }
             case LdScratch : {
-                int16_t* scratch = data->get_scratch(inst);
+                int16_t* scratch = regData->get_scratch(inst);
                 SWITCH_REG({
                     _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
                                            i += vectorLoadStride, j += 8) {
@@ -334,7 +353,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 break;
             }
             case StScratch : {
-                int16_t* scratch = data->get_scratch(inst);
+                int16_t* scratch = regData->get_scratch(inst);
                 SWITCH_REG({
                     _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
                                            i += vectorLoadStride, j += 8) {
@@ -528,8 +547,8 @@ done:;
 RegisterMachine::RegisterMachine(const WeightsData* weights,
                                  InstructionBuffer* wcInstructionBuffer) {
     cudaStreamCreate((cudaStream_t*) &stream);
-    checkError(cudaMalloc(&data, sizeof(RegisterData)));
-    checkError(cudaMemset(data, 0, sizeof(RegisterData)));
+    checkError(cudaMalloc(&regData, sizeof(RegisterData)));
+    checkError(cudaMemset(regData, 0, sizeof(RegisterData)));
 
     this->weights  = weights;
     this->wcBuffer = wcInstructionBuffer;
@@ -537,8 +556,8 @@ RegisterMachine::RegisterMachine(const WeightsData* weights,
 
 RegisterMachine::~RegisterMachine() {
     cudaStreamDestroy((cudaStream_t) stream);
-    cudaFree(data);
-    data     = nullptr;
+    cudaFree(regData);
+    regData     = nullptr;
     wcBuffer = nullptr;
     stream   = nullptr;
 }
@@ -553,7 +572,7 @@ std::array<int16_t, 1024> RegisterMachine::read_scratch(size_t index) const {
     cudaStream_t stream;
     checkError(cudaStreamCreate(&stream));
     checkError(
-      cudaMemcpyAsync(&array, &data->regs[index], sizeof(array), cudaMemcpyDeviceToHost, stream));
+      cudaMemcpyAsync(&array, &regData->regs[index], sizeof(array), cudaMemcpyDeviceToHost, stream));
     checkError(cudaStreamSynchronize(stream));
     checkError(cudaStreamDestroy(stream));
     return array;
@@ -629,7 +648,9 @@ void CudaContext::launch_persistent_kernel() {
         machines[i].isActive = true;
     }
 
+    setup_machine_info<<<machineCount / 32 + 1, 32, 0>>>(machines, machineInfos, machineCount);
+
     persistent_kernel<<<num_blocks, threads_per_block, 0, (cudaStream_t) stream>>>(
-      machines, wcBuffers, machineCount);
+      machines, machineInfos, machineCount);
 }
 }

@@ -315,7 +315,7 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
     unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
     unsigned lane_id = threadIdx.x % ThreadsPerWarp;
 
-    if (warp_id >= num_machines)
+    if (warp_id >= 2)
         return;
 
     // All are the same, so just use the first one

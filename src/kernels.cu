@@ -5,7 +5,6 @@
 #include <memory>
 
 #include <thread>
-#include <x86gprintrin.h>
 #include "nnue/network.h"
 
 // Credit: https://stackoverflow.com/a/14038590

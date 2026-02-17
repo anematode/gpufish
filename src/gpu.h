@@ -146,6 +146,11 @@ struct RegisterMachine {
         update_features<ops...>(reg, indices...);
     }
 
+    void setStopSignal()
+    {
+        wcBuffer->header = MachineStopHeader;
+    }
+
     bool  isActive;
     void* stream;  // cudaStream_t
 

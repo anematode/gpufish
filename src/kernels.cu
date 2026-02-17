@@ -285,6 +285,12 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
         __syncwarp();
         instructionCount = __shfl_sync(0xFFFFFFFF, instructionCount, 0);
 
+        if (instructionCount == MachineStopHeader)
+        {
+            machine->result[0] = 0;
+            return;
+        }
+
         // Copy instructions into shared memory
         for (uint32_t i = lane_id; i < instructionCount; i += ThreadsPerWarp)
         {
@@ -312,14 +318,6 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     parallel_copy(bucketsShared[i], buckets[source], lane_id);
                 }
                 break;
-            }
-            case Exit : {
-                if (lane_id == 0)
-                {
-                    machine->result[0] = 0;
-                    __threadfence_system();
-                }
-                return;
             }
             case LdScratch : {
                 int16_t* scratch = data->get_scratch(inst);
@@ -585,9 +583,7 @@ void CudaContext::stop_all() {
     // Stop all machines
     for (size_t i = 0; i < machineCount; i++)
     {
-        machines[i].blockUntilComplete();
-        machines[i].submit(Instruction::stop());
-        machines[i].flush();
+        machines[i].setStopSignal();
         machines[i].blockUntilComplete();
         machines[i].isActive = false;
     }
@@ -614,6 +610,7 @@ CudaContext::~CudaContext() {
     cudaFree(machines);
     machines  = nullptr;
     wcBuffers = nullptr;
+    machineInfos = nullptr;
 }
 
 void CudaContext::launch_persistent_kernel() {

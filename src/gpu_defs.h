@@ -16,6 +16,9 @@
 #define ThreadsPerWarp 32
 
 namespace Stockfish::GPU {
+
+constexpr uint32_t MachineStopHeader = 0xffff;
+
 enum Opcode {
     SwitchMachine = 0,
     // reg = [mem]

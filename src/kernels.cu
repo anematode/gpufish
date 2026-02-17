@@ -23,6 +23,7 @@ static void gpuAssert(cudaError_t code, const char* file, int line) {
 
 namespace Stockfish::GPU {
 
+constexpr int WarpsPerThreadBlock = 8;
 constexpr int L1EntriesPerThreadSlice = L1Size / ThreadsPerWarp;
 constexpr int PtxRegsPerThreadSlice =
   L1EntriesPerThreadSlice;  // each unsigned contains two 16-bit values
@@ -252,8 +253,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
     // bucketsShared[i - sharedBucketOffset], if in range, is buckets[i]
     int                             sharedBucketOffset = 8;
 
-    __shared__ Instruction cmdBuffers[MaxInstructionsCount * 4];
-    Instruction*           myCmdBuffer = &cmdBuffers[warp_id % 4];
+    __shared__ Instruction cmdBuffers[WarpsPerThreadBlock][MaxInstructionsCount];
+    Instruction* myCmdBuffer = cmdBuffers[warp_id % WarpsPerThreadBlock];
 
     while (true)
     {
@@ -609,7 +610,7 @@ void CudaContext::launch_persistent_kernel() {
     memset(wcBuffers, 0, machineCount * sizeof(InstructionBuffer));
 
     int num_warps         = machineCount;
-    int threads_per_block = 128;
+    int threads_per_block = ThreadsPerWarp * WarpsPerThreadBlock;
     int num_blocks        = (num_warps * 32 + threads_per_block - 1) / threads_per_block;
 
     for (size_t i = 0; i < machineCount; i++)

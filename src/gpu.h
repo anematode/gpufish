@@ -41,8 +41,8 @@ struct alignas(64) InstructionBuffer {
         // write to instruction count must occur after
         std::atomic_thread_fence(std::memory_order_release);
 
-        data +=
-          0x10000;  // increment ID so GPU can distinguish two payloads with equal instruction counts
+        // increment ID so GPU can distinguish two payloads with equal instruction counts
+        data += 0x10000;
         to->data = data;
 
         // The destination buffer is allocated in write-combining memory, so we use an sfence to flush the WC queue

@@ -86,12 +86,58 @@ struct WeightsData {
 // GPU-side, collectively managed by warps to perform work stealing. Important data members are also hoisted here
 // to avoid expensive host accesses.
 struct CachedMachineInfo {
-    int      warp_id;
+    alignas(8) int      warp_id;
     uint32_t last_buffer_header;  // used to distinguish a new header
 
     RegisterData*      regData;
     InstructionBuffer* wcBuffer;
 };
+
+constexpr int NO_WARP = -1;
+
+__device__ inline unsigned long long pack_info(int warp_id, uint32_t header) {
+    unsigned long long packed = (unsigned int)warp_id;
+    packed |= ((unsigned long long)header << 32);
+    return packed;
+}
+
+__device__ inline void unpack_info(unsigned long long packed, int& warp_id, uint32_t& last_id) {
+    warp_id = (int)(packed & 0xFFFFFFFF);
+    last_id = (uint32_t)(packed >> 32);
+}
+
+__device__ int claim_info(CachedMachineInfo* arr, uint32_t& header, int arrCount, int myWarpId) {
+    while (true) {
+        for (int i = 0; i < arrCount; ++i) {
+            auto* as64 = reinterpret_cast<unsigned long long*>(&arr[i]);
+            auto currentPacked = *const_cast<volatile unsigned long long*>(as64);
+
+            int currentWarp;
+            uint32_t lastHeader;
+            unpack_info(currentPacked, currentWarp, lastHeader);
+
+            header = *reinterpret_cast<volatile uint32_t*>(&arr->wcBuffer->header);
+
+            if (currentWarp == NO_WARP && lastHeader != header) {
+                unsigned long long newPacked = pack_info(myWarpId, lastHeader);
+
+                if (atomicCAS(as64, currentPacked, newPacked) == currentPacked)
+                    // Success
+                    return i;
+            }
+        }
+
+        __nanosleep(50);
+    }
+}
+
+__device__ void release_info(CachedMachineInfo* arr, int i, uint32_t header)
+{
+    unsigned long long* as64 = reinterpret_cast<unsigned long long*>(&arr[i]);
+    unsigned long long releasedPacked = pack_info(-1, header);
+
+    atomicExch(as64, releasedPacked);
+}
 
 
 __device__ static bool is_halfka_reg(Reg reg) { return reg == A || reg == B; }
@@ -157,8 +203,6 @@ __device__ void insert_byte(unsigned& i, int byte, int offset) {
     i |= byte << shamt;
 }
 
-constexpr int NO_WARP = -1;
-
 __global__ void setup_machine_info(const RegisterMachine* machines,
                                    CachedMachineInfo*     machine_infos,
                                    int                    num_machines) {
@@ -193,7 +237,6 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
     unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
     unsigned lane_id = threadIdx.x % ThreadsPerWarp;
 
-    // Each warp picks a queue to monitor
     if (warp_id >= num_machines)
         return;
 
@@ -201,9 +244,9 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
     auto* transformer = machines[0].weights->transformer;
     auto* buckets     = machines[0].weights->buckets;
 
-    RegisterMachine*   machine           = &machines[warp_id];
-    InstructionBuffer* instructionBuffer = machine_infos[warp_id].wcBuffer;
-    RegisterData*      regData           = machine_infos[warp_id].regData;
+    RegisterMachine*   machine;
+    InstructionBuffer* instructionBuffer;
+    RegisterData*      regData;
 
     typedef int reg_t[PtxRegsPerThreadSlice];
     reg_t       regA, regB, regC, regD;
@@ -286,18 +329,21 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
     __shared__ Instruction cmdBuffers[MaxInstructionsCount * 4];
     Instruction*           myCmdBuffer = &cmdBuffers[warp_id % 4];
 
+    int machine_id = -1;
+    uint32_t header;
+
     while (true)
     {
         // Warp leader polls the queue
         if (lane_id == 0)
         {
-            uint32_t temp;
-            while ((temp = *(volatile uint32_t*) &instructionBuffer->header) == signal)
+            if (machine_id >= 0)
             {
-                __nanosleep(50);  // TODO better approach here?
+                release_info(machine_infos, machine_id, header);
             }
-            signal           = temp;
-            instructionCount = signal & 0xffff;
+
+            machine_id = claim_info(machine_infos, header, num_machines, warp_id);
+            instructionCount = header & 0xffff;
         }
 
         __syncwarp();
@@ -305,9 +351,14 @@ persistent_kernel(RegisterMachine* machines, CachedMachineInfo* machine_infos, i
 
         if (instructionCount == MachineStopHeader)
         {
-            machine->result[0] = 0;
             return;
         }
+
+        machine_id = __shfl_sync(0xFFFFFFFF, machine_id, 0);
+
+        machine = &machines[machine_id];
+        regData = machine_infos[machine_id].regData;
+        instructionBuffer = machine_infos[machine_id].wcBuffer;
 
         // Copy instructions into shared memory
         for (uint32_t i = lane_id; i < instructionCount; i += ThreadsPerWarp)
@@ -602,7 +653,6 @@ void CudaContext::stop_all() {
     for (size_t i = 0; i < machineCount; i++)
     {
         machines[i].setStopSignal();
-        machines[i].blockUntilComplete();
         machines[i].isActive = false;
     }
 

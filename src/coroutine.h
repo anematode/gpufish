@@ -71,7 +71,8 @@ class CoroutineContext {
     // switches to the target context.
 #if X86_64_COROUTINE_IMPL
     __attribute__ ((naked))
-    __attribute__ ((preserve_none))
+    // __attribute__ ((preserve_none))
+    __attribute__ ((no_callee_saved_registers))
 #endif
     void switch_to(CoroutineContext& target);
 

@@ -63,7 +63,7 @@ void CoroutineContext::switch_to(CoroutineContext& target) {
     // ABI:
     // rdi;  CoroutineContext* this
     // rsi;  CoroutineContext* target
-    asm volatile (
+    asm (
         "movq  8(%rsi), %rdx; \n" // load target->stack into rdx
         "movq 16(%rsi), %rbx; \n" // load target->coroutineFunction into rbx
         "movl 24(%rsi), %ecx; \n" // load target->functionArgument into rcx
@@ -71,19 +71,22 @@ void CoroutineContext::switch_to(CoroutineContext& target) {
         "jz 0f; \n" // if already been started, just switch to it
             // otherwise, set up call stack for the target
             "sub $16, %rdx; \n"
-            "movq %rsi, 0(%rdx); \n" // push CoroutineContext* target
+            "movq %rsi, 8(%rdx); \n" // push CoroutineContext* target
             "lea 2f(%rip), %rax; \n"
-            "movq %rax, 8(%rdx); \n" // push trampoline (ret addr)
+            "movq %rax, 0(%rdx); \n" // push trampoline (ret addr)
             "mov %rdx, %rax; \n"
             "sub $8, %rdx; \n"
-            "movq %rax, 8(%rdx); \n" // push same stack addr (rbp)
+            "movq %rax, 0(%rdx); \n" // push same stack addr (rbp)
             "movq $0, 16(%rsi); \n" // store 0 into target->coroutineFunction
             "movq %rbx, 32(%rsi); \n" // store rbx into target->instructionPointer
+            "movq  %rdx, 8(%rsi); \n" // store back into target->stack
+            // "ud2; \n"
         "0: \n" // switch to the coroutine
             "push %rbp; \n" // save rbp on our stack
             "movq %rsp, 8(%rdi); \n" // store rsp in this->stack
             "lea 1f(%rip), %rax; \n"
             "movq %rax, 32(%rdi); \n" // store continuation addr in this->instructionPointer
+            "movq 8(%rsi), %rdx; \n"
             "movq %rdx, %rsp; \n" // use target->stack as rsp
             "pop %rbp; \n" // pop rbp from the new stack
             "movq %rcx, %rdi; \n" // copy target->functionArgument into rdi
@@ -91,12 +94,18 @@ void CoroutineContext::switch_to(CoroutineContext& target) {
             "jmp *%rbx; \n"  // jump to target->instructionPointer, start executing
         "1: \n" // control flow returned from coroutine
             // resume execution like normal
-            "pop %rbp; \n" // pop rbp from our stack
+            // "ud2; \n"
             "ret; \n"
         "2: \n" // the return trampoline
-            // jump to the CoroutineContext* parentContext, stored on the stack
-            "pop %rsi; \n" // load parentContext into rsi
-            "movq 32(%rsi), %rbx; \n"
+            // jump to the ctx->parentContext, stored on the stack
+            "pop %rdi; \n" // load current context pointer into rdi
+            "movq $0, 32(%rdi); \n" // safety measure: clear instructionPointer
+            "movq 0(%rdi), %rsi; \n" // load parentContext into rsi
+            "movq 8(%rsi), %rdx; \n" // load parentContext->stack into rdx
+            "movq %rdx, %rsp; \n" // use parentContext->stack as rsp
+            "pop %rbp; \n" // pop rbp from the parent stack
+            "movq 32(%rsi), %rbx; \n" // load parentContext->instructionPointer into rbx
+            // "ud2; \n"
             "jmp *%rbx; \n"  // jump to parentContext->instructionPointer, start executing
     );
 

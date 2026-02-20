@@ -24,7 +24,6 @@
 #include <cstdio>
 
 namespace Stockfish {
-
 #if X86_64_COROUTINE_IMPL /* TODO: INCOMPLETE */
 
 CoroutineContext::CoroutineContext() {
@@ -52,12 +51,20 @@ void CoroutineContext::set_entry_point(CoroutineFunction* func, int invocationAr
 __attribute__ ((naked))
 __attribute__ ((preserve_none))
 void CoroutineContext::switch_to(CoroutineContext& target) {
-    if (target.coroutineFunction)
-    {
+    asm(
+        "xor eax, eax;\n"
+        "ret\n"
+    );
+
+    // if (target.coroutineFunction)
+    // {
         // hasn't started executing target for the first time yet;
+        // push &target
+        // push ret address: trampoline
         // set up the call stack for target, and arg in a temp1 register
+        // set target.instructionPointer = coroutineFunction
         // set target.coroutineFunction to nullptr
-    }
+    // }
 
     // load target.instructionPointer into a temp2 register
     // push rbp to our stack
@@ -67,6 +74,16 @@ void CoroutineContext::switch_to(CoroutineContext& target) {
     // pop rbp
     // put temp1 value into rdi register (call arg)
     // start executing temp2 as rip
+
+
+
+
+
+
+
+    // trampoline(CoroutineContext* retContext /* on stack */) {
+    //     // load the retContext stack again and jump to it
+    // }
 }
 
 #else  // normal setcontext implementation

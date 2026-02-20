@@ -69,6 +69,10 @@ class CoroutineContext {
 
     // saves the current context into this object, and
     // switches to the target context.
+#if X86_64_COROUTINE_IMPL
+    __attribute__ ((naked))
+    __attribute__ ((preserve_none))
+#endif
     void switch_to(CoroutineContext& target);
 
    private:
@@ -77,6 +81,7 @@ class CoroutineContext {
     char* stack;
     CoroutineFunction* coroutineFunction;
     int functionArgument;
+    void *instructionPointer;
 #else  // normal setcontext implementation
     ucontext_t context;
 #endif

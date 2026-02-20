@@ -31,8 +31,43 @@ CoroutineContext::CoroutineContext() {
     parentContext = nullptr;
     stack = nullptr;
     coroutineFunction = nullptr;
+    instructionPointer = nullptr;
 }
-// todo: actually implement this custom context switch for x86_64
+
+void CoroutineContext::init_from_current_context() {}
+
+void CoroutineContext::set_parent_context(CoroutineContext* parent) {
+    parentContext = parent;
+}
+
+void CoroutineContext::set_stack_region(void* stackPointer, size_t stackSize) {
+    stack = reinterpret_cast<char*>(stackPointer) + stackSize;
+}
+
+void CoroutineContext::set_entry_point(CoroutineFunction* func, int invocationArgument) {
+    coroutineFunction = func;
+    functionArgument = invocationArgument;
+}
+
+__attribute__ ((naked))
+__attribute__ ((preserve_none))
+void CoroutineContext::switch_to(CoroutineContext& target) {
+    if (target.coroutineFunction)
+    {
+        // hasn't started executing target for the first time yet;
+        // set up the call stack for target, and arg in a temp1 register
+        // set target.coroutineFunction to nullptr
+    }
+
+    // load target.instructionPointer into a temp2 register
+    // push rbp to our stack
+    // save our rsp to this.stack
+    // save our rip to this.instructionPointer
+    // set stack to target.stack
+    // pop rbp
+    // put temp1 value into rdi register (call arg)
+    // start executing temp2 as rip
+}
 
 #else  // normal setcontext implementation
 

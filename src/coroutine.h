@@ -73,8 +73,8 @@ class CoroutineContext {
 #if X86_64_COROUTINE_IMPL
     #pragma GCC diagnostic error "-Wattributes"
     __attribute__ ((naked))
-    __attribute__ ((preserve_none))
-    // __attribute__ ((no_callee_saved_registers))
+    // __attribute__ ((preserve_none))
+    __attribute__ ((no_callee_saved_registers))
 #endif
     void switch_to(CoroutineContext& target);
 #pragma GCC diagnostic pop

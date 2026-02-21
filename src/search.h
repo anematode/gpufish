@@ -271,7 +271,7 @@ struct CustomStack {
     const size_t size;
 
     CustomStack(size_t s = StackSize) :
-        size(s - 8) {
+        size(s) {
         mem = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         if (mem == MAP_FAILED)
         {

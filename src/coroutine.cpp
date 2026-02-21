@@ -21,6 +21,7 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <cstdint>
 #include <cstdio>
 
 namespace Stockfish {
@@ -40,7 +41,10 @@ void CoroutineContext::set_parent_context(CoroutineContext* parent) {
 }
 
 void CoroutineContext::set_stack_region(void* stackPointer, size_t stackSize) {
-    stack = reinterpret_cast<char*>(stackPointer) + stackSize;
+    auto addr = reinterpret_cast<uintptr_t>(stackPointer) + stackSize;
+    addr &= ~UINT64_C(15);  // align to 16 bytes
+    addr -= 8;              // then subtract 8 bytes for the return address
+    stack = reinterpret_cast<char*>(addr);
 }
 
 void CoroutineContext::set_entry_point(CoroutineFunction* func, int invocationArgument) {
@@ -59,7 +63,6 @@ void CoroutineContext::set_entry_point(CoroutineFunction* func, int invocationAr
 __attribute__ ((naked))
 // __attribute__ ((preserve_none))
 __attribute__ ((no_callee_saved_registers))
-__attribute__ ((noinline))
 void CoroutineContext::switch_to(CoroutineContext& target) {
     // ABI:
     // rdi;  CoroutineContext* this

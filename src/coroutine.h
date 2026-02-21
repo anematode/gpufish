@@ -69,12 +69,16 @@ class CoroutineContext {
 
     // saves the current context into this object, and
     // switches to the target context.
+#pragma GCC diagnostic push
 #if X86_64_COROUTINE_IMPL
+    #pragma GCC diagnostic error "-Wattributes"
     __attribute__ ((naked))
-    // __attribute__ ((preserve_none))
-    __attribute__ ((no_callee_saved_registers))
+    __attribute__ ((preserve_none))
+    // __attribute__ ((no_callee_saved_registers))
 #endif
     void switch_to(CoroutineContext& target);
+#pragma GCC diagnostic pop
+
 
    private:
 #if X86_64_COROUTINE_IMPL

@@ -57,8 +57,8 @@ void CoroutineContext::set_entry_point(CoroutineFunction* func, int invocationAr
  */
 
 __attribute__ ((naked))
-// __attribute__ ((preserve_none))
-__attribute__ ((no_callee_saved_registers))
+__attribute__ ((preserve_none))
+// __attribute__ ((no_callee_saved_registers))
 void CoroutineContext::switch_to(CoroutineContext& target) {
     // ABI:
     // rdi;  CoroutineContext* this

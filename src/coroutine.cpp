@@ -65,7 +65,6 @@ void CoroutineContext::switch_to(CoroutineContext& target) {
     // rdi;  CoroutineContext* this
     // rsi;  CoroutineContext* target
     asm (
-        "push %r10; \n"
         "movq  8(%rsi), %rdx; \n" // load target->stack into rdx
         "movq 16(%rsi), %rbx; \n" // load target->coroutineFunction into rbx
         "movl 24(%rsi), %ecx; \n" // load target->functionArgument into rcx
@@ -97,7 +96,6 @@ void CoroutineContext::switch_to(CoroutineContext& target) {
         "1: \n" // control flow returned from coroutine
             // resume execution like normal
             // "ud2; \n"
-        "pop %r10; \n"
             "ret; \n"
         "2: \n" // the return trampoline
             // jump to the ctx->parentContext, stored on the stack

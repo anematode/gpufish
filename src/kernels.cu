@@ -177,6 +177,9 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
     typedef int reg_t[PtxRegsPerThreadSlice];
     reg_t       regA, regB, regC, regD;
 
+    // Pairwise multiplication values
+    unsigned packed[L1EntriesPerThreadSlice / 4] = {0};
+
     uint32_t           myL1Offset       = 8 * lane_id;
     constexpr uint32_t vectorLoadStride = 8 * ThreadsPerWarp;
 
@@ -399,8 +402,9 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 break;
             }
             case Finalize : {
-                // Pairwise multiplication values
-                unsigned packed[L1EntriesPerThreadSlice / 4] = {0};
+                // Reset regs
+                for (auto& p : packed)
+                    p = 0;
 
                 auto to16 = [](int a) { return a << 16 >> 16; };
 

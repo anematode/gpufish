@@ -43,10 +43,10 @@ enum Opcode {
 };
 
 enum Reg {
-    A,
-    B,
-    C,
-    D
+    A = 0,
+    B = 0,
+    C = 2,
+    D = 2
 };
 
 // "Register machine" architecture:

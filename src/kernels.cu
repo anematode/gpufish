@@ -4,9 +4,12 @@
 #include <cstdio>
 #include <memory>
 #include <cuda_pipeline.h>
+#include <cooperative_groups.h>
 
 #include <thread>
 #include "nnue/network.h"
+
+namespace cg = cooperative_groups;
 
 // Credit: https://stackoverflow.com/a/14038590
 #define checkError(ans) \
@@ -162,8 +165,11 @@ parallel_copy(Eval::NNUE::L1Bucket& dest, const Eval::NNUE::L1Bucket& src, unsig
 
 __global__ void
 persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num_machines) {
+    cg::thread_block        block   = cg::this_thread_block();
+    cg::thread_block_tile<32> warp  = cg::tiled_partition<32>(block);
+
     unsigned warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerWarp;
-    unsigned lane_id = threadIdx.x % ThreadsPerWarp;
+    unsigned lane_id = warp.thread_rank();
 
     // Each warp picks a queue to monitor
     if (warp_id >= num_machines)
@@ -234,8 +240,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
             myCmdBuffer[instructionCount] = Instruction::nop();
         }
 
-        __syncwarp();
-        instructionCount = __shfl_sync(0xFFFFFFFF, instructionCount, 0);
+        warp.sync();
+        instructionCount = warp.shfl(instructionCount, 0);
 
         // Copy instructions into shared memory
         for (uint32_t i = lane_id; i < instructionCount; i += ThreadsPerWarp)
@@ -243,12 +249,12 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
             myCmdBuffer[i] = instructionBuffer->list[i];
         }
 
-        __syncwarp();
+        warp.sync();
         Instruction nextInst = myCmdBuffer[0];
 
         for (uint32_t inst_i = 0; inst_i < instructionCount; ++inst_i)
         {
-            __syncwarp();
+            warp.sync();
 
             Instruction inst = nextInst;
             nextInst         = myCmdBuffer[inst_i + 1];
@@ -401,24 +407,27 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 else
                     bucket = &buckets[bucketIndex];
 
-                int accumulation = lane_id < 16 ? bucket->biases[lane_id] : 0;
-                unsigned activeMask = lane_id < 16 ? 0xFFFF : 0xFFFF0000U;
+                cg::thread_block_tile<16> half_warp = cg::tiled_partition<16>(warp);
+                unsigned half_lane   = half_warp.thread_rank();
+                unsigned half_offset = (lane_id >= 16) ? 32 : 0;
+
+                int accumulation = bucket->biases[half_lane];
 
 #pragma unroll
                 for (int j = 0, q = 0; j < L1EntriesPerThreadSlice / 4; j += 2)
                 {
-                    unsigned nnz1 = __ballot_sync(0xFFFFFFFF, packed[j]) & activeMask;
-                    unsigned nnz2 = __ballot_sync(0xFFFFFFFF, packed[j + 1]) & activeMask;
+                    unsigned nnz1 = half_warp.ballot(packed[j]);
+                    unsigned nnz2 = half_warp.ballot(packed[j + 1]);
 
                     auto process_nnz = [&] (unsigned& nnz, int q_offset)
                     {
                         int th_i = __ffs(nnz) - 1;
                         nnz &= nnz - 1;
 
-                        int selected = __shfl_sync(activeMask, packed[j + q_offset], th_i);
+                        int selected = half_warp.shfl(packed[j + q_offset], th_i);
                         accumulation =
                           __dp4a(selected,
-                                 *((int*) &bucket->weights[64 * (q + q_offset + 2 * th_i)] + (lane_id % 16)),
+                                 *((int*) &bucket->weights[64 * (q + q_offset + 2 * th_i + half_offset)] + half_lane),
                                  accumulation);
                     };
 
@@ -431,7 +440,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     q += ThreadsPerWarp * 2;
                 }
 
-                accumulation += __shfl_down_sync(0xFFFFFFFF, accumulation, 16);
+                accumulation += warp.shfl_down(accumulation, 16);
 
                 if (lane_id < 16)
                     machine->result[lane_id] = accumulation;
@@ -472,7 +481,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
         }
 
 done:;
-        __syncwarp();
+        warp.sync();
     }
 }
 

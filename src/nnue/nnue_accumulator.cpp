@@ -166,7 +166,8 @@ void AccumulatorStack::evaluate(const Position&                       pos,
     if (UseThreats)
     {
         evaluate_side<ThreatFeatureSet>(WHITE, pos, featureTransformer, cache);
-        prepare_for_finalize(machine, latest<PSQFeatureSet>(), latest<ThreatFeatureSet>(), WHITE, pos.side_to_move());
+        prepare_for_finalize(machine, latest<PSQFeatureSet>(), latest<ThreatFeatureSet>(), WHITE,
+                             pos.side_to_move());
     }
 
     evaluate_side<PSQFeatureSet>(BLACK, pos, featureTransformer, cache);
@@ -174,7 +175,8 @@ void AccumulatorStack::evaluate(const Position&                       pos,
     if (UseThreats)
     {
         evaluate_side<ThreatFeatureSet>(BLACK, pos, featureTransformer, cache);
-        prepare_for_finalize(machine, latest<PSQFeatureSet>(), latest<ThreatFeatureSet>(), BLACK, pos.side_to_move());
+        prepare_for_finalize(machine, latest<PSQFeatureSet>(), latest<ThreatFeatureSet>(), BLACK,
+                             pos.side_to_move());
     }
 }
 
@@ -989,7 +991,7 @@ void prepare_for_finalize(GPU::RegisterMachine*                          machine
                           const AccumulatorState<Features::HalfKAv2_hm>& acc,
                           const AccumulatorState<Features::FullThreats>& threatsAcc,
                           Color                                          c,
-                          Color stm) {
+                          Color                                          stm) {
     machine->submit(GPU::Instruction::load_scratch(c ? GPU::B : GPU::A, acc.scratchSlot[c]));
     machine->submit(GPU::Instruction::load_scratch(c ? GPU::D : GPU::C, threatsAcc.scratchSlot[c]));
     machine->submit(GPU::Instruction::pack8(c ^ stm));

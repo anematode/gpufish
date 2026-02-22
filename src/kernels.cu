@@ -250,7 +250,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
             __syncwarp();
 
             Instruction inst = nextInst;
-            nextInst = myCmdBuffer[inst_i + 1];
+            nextInst         = myCmdBuffer[inst_i + 1];
 
             switch (inst.opcode())
             {
@@ -310,7 +310,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
             case Pack8 : {
                 auto get = [&](int i) {
                     int j   = i % 2 ? 1 : 17;
-                    int sum = regA[i/2] + regC[i/2];
+                    int sum = regA[i / 2] + regC[i / 2];
                     return sum << j >> 17;
                 };
 
@@ -340,7 +340,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 {
                     const int16_t* weights = &transformer->weights[index * L1Size];
 #pragma unroll
-                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4) {
+                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4)
+                    {
                         int4 data = *(int4*) &weights[i];
                         unpack16_to_32<Add>(data.x, regA[j]);
                         unpack16_to_32<Add>(data.y, regA[j + 1]);
@@ -352,7 +353,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 {
                     const int8_t* weights = &transformer->threatWeights[index * L1Size];
 #pragma unroll
-                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4) {
+                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4)
+                    {
                         int2 data = *(int2*) &weights[i];
                         unpack8_to_32<Add>(data.x, regC[j], regC[j + 1]);
                         unpack8_to_32<Add>(data.y, regC[j + 2], regC[j + 3]);
@@ -366,7 +368,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 {
                     const int16_t* weights = &transformer->weights[index * L1Size];
 #pragma unroll
-                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4) {
+                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4)
+                    {
                         int4 data = *(int4*) &weights[i];
                         unpack16_to_32<Sub>(data.x, regA[j]);
                         unpack16_to_32<Sub>(data.y, regA[j + 1]);
@@ -378,7 +381,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 {
                     const int8_t* weights = &transformer->threatWeights[index * L1Size];
 #pragma unroll
-                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4) {
+                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4)
+                    {
                         int2 data = *(int2*) &weights[i];
                         unpack8_to_32<Sub>(data.x, regC[j], regC[j + 1]);
                         unpack8_to_32<Sub>(data.y, regC[j + 2], regC[j + 3]);
@@ -434,7 +438,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 if (is_halfka_reg(inst.decode_reg()))
                 {
 #pragma unroll
-                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4) {
+                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4)
+                    {
                         int4 data = *(int4*) &transformer->biases.data()[i];
                         unpack16_to_32<Store>(data.x, regA[j + 0]);
                         unpack16_to_32<Store>(data.y, regA[j + 1]);
@@ -445,7 +450,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 else
                 {
 #pragma unroll
-                    for (int i = 0; i < PtxRegsPerThreadSlice; i++) regC[i] = 0;
+                    for (int i = 0; i < PtxRegsPerThreadSlice; i++)
+                        regC[i] = 0;
                 }
 
                 break;

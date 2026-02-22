@@ -106,9 +106,7 @@ struct Instruction {
         return {uint32_t((max_bucket << OpcodeBits) + PreloadL1Buckets)};
     }
 
-    static constexpr Instruction nop() {
-        return { uint32_t(Nop) };
-    }
+    static constexpr Instruction nop() { return {uint32_t(Nop)}; }
 
     static constexpr void check_wide_index([[maybe_unused]] size_t idx) {
         assert(idx < (1 << WideIndexBits));

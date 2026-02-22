@@ -401,25 +401,39 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     bucket = &buckets[bucketIndex];
 
                 int accumulation = lane_id < 16 ? bucket->biases[lane_id] : 0;
+                unsigned activeMask = lane_id < 16 ? 0xFFFF : 0xFFFF0000U;
 
 #pragma unroll
-                for (int j = 0, q = lane_id >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
+                for (int j = 0, q = 0; j < L1EntriesPerThreadSlice / 4; j += 2)
                 {
-                    unsigned nnz = __ballot_sync(0xFFFFFFFF, packed[j] | packed[j + 1]);
-                    while (nnz)
+                    unsigned nnz1 = __ballot_sync(0xFFFFFFFF, packed[j]) & activeMask;
+                    unsigned nnz2 = __ballot_sync(0xFFFFFFFF, packed[j + 1]) & activeMask;
+
+                    while (nnz1)
                     {
                         // Pop off the lowest bit
                         // TODO: Consider further permuting the features so that packed[j] and packed[j+1] correlate
-                        int th_i = __ffs(nnz) - 1;
-                        nnz &= nnz - 1;
+                        int th_i = __ffs(nnz1) - 1;
+                        nnz1 &= nnz1 - 1;
 
-                        int b1 = __shfl_sync(0xFFFFFFFF, packed[j], th_i);
-                        int b2 = __shfl_sync(0xFFFFFFFF, packed[j + 1], th_i);
-
-                        int selected = lane_id < 16 ? b1 : b2;
+                        int selected = __shfl_sync(activeMask, packed[j], th_i);
                         accumulation =
                           __dp4a(selected,
                                  *((int*) &bucket->weights[64 * (q + 2 * th_i)] + (lane_id % 16)),
+                                 accumulation);
+                    }
+
+                    while (nnz2)
+                    {
+                        // Pop off the lowest bit
+                        // TODO: Consider further permuting the features so that packed[j] and packed[j+1] correlate
+                        int th_i = __ffs(nnz2) - 1;
+                        nnz2 &= nnz2 - 1;
+
+                        int selected = __shfl_sync(activeMask, packed[j + 1], th_i);
+                        accumulation =
+                          __dp4a(selected,
+                                 *((int*) &bucket->weights[64 * (q + 1 + 2 * th_i)] + (lane_id % 16)),
                                  accumulation);
                     }
 

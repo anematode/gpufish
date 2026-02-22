@@ -64,7 +64,7 @@ PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
 
 ### Built-in benchmark for pgo-builds
-PGOBENCH = $(RUN_PREFIX) ./$(EXE) bench
+PGOBENCH = $(RUN_PREFIX) WorkersPerThread=1 ./$(EXE) bench
 
 ### Source and object files
 ASMS = coroutine_x86.S

@@ -23,7 +23,7 @@ static void gpuAssert(cudaError_t code, const char* file, int line) {
 
 namespace Stockfish::GPU {
 
-constexpr int WarpsPerThreadBlock     = 8;
+constexpr int WarpsPerThreadBlock     = 16;
 constexpr int L1EntriesPerThreadSlice = L1Size / ThreadsPerWarp;
 // each unsigned contains two 16-bit values
 constexpr int PtxRegsPerThreadSlice = L1EntriesPerThreadSlice / 2;

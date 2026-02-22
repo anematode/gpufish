@@ -24,8 +24,8 @@ namespace Stockfish::GPU {
 
 constexpr int WarpsPerThreadBlock = 8;
 constexpr int L1EntriesPerThreadSlice = L1Size / ThreadsPerWarp;
-constexpr int PtxRegsPerThreadSlice =
-  L1EntriesPerThreadSlice;  // each unsigned contains two 16-bit values
+// each unsigned contains two 16-bit values
+constexpr int PtxRegsPerThreadSlice = L1EntriesPerThreadSlice / 2;
 
 struct ScratchReg {
     int16_t data[L1Size];
@@ -91,51 +91,42 @@ enum ReduceOp {
 };
 
 template<ReduceOp op>
-__device__ void unpack16_to_32(int i, int& i1, int& i2) {
+__device__ void unpack16_to_32(unsigned i, unsigned& i1) {
     switch (op)
     {
     case Add :
-        i1 += i;  // we only care about the low 16 bits
-
-        // dp2a.lo.b32 multiplies the 2 16-bit signed halfwords in first arg by the 2 low 8-bit signed bytes in the
-        // second arg. Thus, this extracts the high 16 bits of the operand i and adds them to i2.
-        i2 = __dp2a_lo(i, 1 << 8, i2);
+        i1 &= 0x7fff7fff;
+        i1 += i & 0x7fff7fff;
+        i1 &= 0x7fff7fff;
         return;
     case Sub :
-        i1 -= i;  // we only care about the low 16 bits
-        i2 = __dp2a_lo(i, 0xff << 8, i2);
+        i1 |= 0x80008000U;
+        i1 -= i & 0x7fff7fff;
+        i1 &= 0x7fff7fff;
         return;
     case Store :
         i1 = i;
-        i2 = i >> 16;
     }
+}
+
+__device__ void cvt8_to_16(uint32_t data, uint32_t *l, uint32_t *h)
+{
+    uint32_t lo, hi;
+    asm ("prmt.b32 %0,%2,0,0x9180;\n"
+         "prmt.b32 %1,%2,0,0xb3a2;" :  "=r"(lo), "=r"(hi) : "r"(data));
+    *l = lo;
+    *h = hi;
 }
 
 template<ReduceOp op>
-__device__ void unpack8_to_32(int i, int& i1, int& i2, int& i3, int& i4) {
-    switch (op)
-    {
-    case Add :
-        // see above comment -- analogous to __dp2a
-        i1 = __dp4a(i, 0x1, i1);
-        i2 = __dp4a(i, 0x1 << 8, i2);
-        i3 = __dp4a(i, 0x1 << 16, i3);
-        i4 = __dp4a(i, 0x1 << 24, i4);
-        return;
-    case Sub :
-        i1 = __dp4a(i, 0xff, i1);
-        i2 = __dp4a(i, 0xff << 8, i2);
-        i3 = __dp4a(i, 0xff << 16, i3);
-        i4 = __dp4a(i, 0xff << 24, i4);
-        return;
-    case Store :
-        assert(false);
-    }
-}
+__device__ void unpack8_to_32(int i, unsigned& i1, unsigned& i2) {
+    uint32_t lo, hi;
+    cvt8_to_16(i, &lo, &hi);
+    lo &= 0x7fff7fff;
+    hi &= 0x7fff7fff;
 
-__device__ int pack16(int i1, int i2, int& out) {
-    // TODO: check this gets optimized to bfi.b32 or wtv
-    out = (i1 & 0xffff) + (unsigned(i2) << 16);
+    unpack16_to_32<op>(lo, i1);
+    unpack16_to_32<op>(hi, i2);
 }
 
 __device__ void insert_byte(unsigned& i, int byte, int offset) {
@@ -174,7 +165,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
     auto*         transformer = machine->weights->transformer;
     auto*         buckets     = machine->weights->buckets;
 
-    typedef int reg_t[PtxRegsPerThreadSlice];
+    typedef unsigned reg_t[PtxRegsPerThreadSlice];
     reg_t       regA, regC;
 
     // Pairwise multiplication values
@@ -279,12 +270,12 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 int16_t* scratch = data->get_scratch(inst);
                 SWITCH_REG({
                     _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                           i += vectorLoadStride, j += 8) {
+                                           i += vectorLoadStride, j += 4) {
                         int4 data = *(int4*) &scratch[i];
-                        unpack16_to_32<Store>(data.x, r[j], r[j + 1]);
-                        unpack16_to_32<Store>(data.y, r[j + 2], r[j + 3]);
-                        unpack16_to_32<Store>(data.z, r[j + 4], r[j + 5]);
-                        unpack16_to_32<Store>(data.w, r[j + 6], r[j + 7]);
+                        r[j] = data.x;
+                        r[j + 1] = data.y;
+                        r[j + 2] = data.z;
+                        r[j + 3] = data.w;
                     }
                 })
                 break;
@@ -293,12 +284,12 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 int16_t* scratch = data->get_scratch(inst);
                 SWITCH_REG({
                     _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                           i += vectorLoadStride, j += 8) {
+                                           i += vectorLoadStride, j += 4) {
                         int4 result;
-                        pack16(r[j], r[j + 1], result.x);
-                        pack16(r[j + 2], r[j + 3], result.y);
-                        pack16(r[j + 4], r[j + 5], result.z);
-                        pack16(r[j + 6], r[j + 7], result.w);
+                        result.x = r[j];
+                        result.y = r[j + 1];
+                        result.z = r[j + 2];
+                        result.w = r[j + 3];
                         *(int4*) &scratch[i] = result;
                     }
                 })
@@ -306,18 +297,22 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 break;
             }
             case Pack8: {
-                auto to16 = [](int a) { return a << 16 >> 16; };
+                auto get = [&] (int i) {
+                    int j = i % 2 ? 1 : 17;
+                    int sum = int(regA[i / 2] << j) >> 17;
+                    sum += int(regC[i / 2] << j) >> 17;
+                    return sum;
+                };
 
-                auto apply = [&] (reg_t src1, reg_t src2, int p) {
+                auto apply = [&] (int p) {
                     int      offset = p * (L1EntriesPerThreadSlice / 8);
                     for (int i = 0; i < L1EntriesPerThreadSlice / 8; ++i)
                         packed[offset + i] = 0;
 #pragma unroll
                     for (int i = 0; i < L1EntriesPerThreadSlice / 2; ++i)
                     {
-                        int sum0 = std::clamp(to16(src1[i] + src2[i]), 0, 255);
-                        int sum1 = std::clamp(to16(src1[i + L1EntriesPerThreadSlice / 2]
-                                                   + src2[i + L1EntriesPerThreadSlice / 2]),
+                        int sum0 = std::clamp(get(i), 0, 255);
+                        int sum1 = std::clamp(get(i + L1EntriesPerThreadSlice / 2),
                                               0, 255);
 
                         insert_byte(packed[offset + i / 4], unsigned(sum0 * sum1) / 512, i % 4);
@@ -325,9 +320,9 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 };
 
                 if (inst.decode_pack_half()) {
-                    apply(regA, regC, 1);
+                    apply(1);
                 } else {
-                    apply(regA, regC, 0);
+                    apply(0);
                 }
                 break;
             }
@@ -338,12 +333,12 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     const int16_t* weights = &transformer->weights[index * L1Size];
                     SWITCH_REG_HALFKA({
                         _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                               i += vectorLoadStride, j += 8) {
+                                               i += vectorLoadStride, j += 4) {
                             int4 data = *(int4*) &weights[i];
-                            unpack16_to_32<Add>(data.x, r[j], r[j + 1]);
-                            unpack16_to_32<Add>(data.y, r[j + 2], r[j + 3]);
-                            unpack16_to_32<Add>(data.z, r[j + 4], r[j + 5]);
-                            unpack16_to_32<Add>(data.w, r[j + 6], r[j + 7]);
+                            unpack16_to_32<Add>(data.x, r[j]);
+                            unpack16_to_32<Add>(data.y, r[j + 1]);
+                            unpack16_to_32<Add>(data.z, r[j + 2]);
+                            unpack16_to_32<Add>(data.w, r[j + 3]);
                         }
                     })
                 }
@@ -352,10 +347,10 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     const int8_t* weights = &transformer->threatWeights[index * L1Size];
                     SWITCH_REG_THREATS(({
                         _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                               i += vectorLoadStride, j += 8) {
+                                               i += vectorLoadStride, j += 4) {
                             int2 data = *(int2*) &weights[i];
-                            unpack8_to_32<Add>(data.x, r[j], r[j + 1], r[j + 2], r[j + 3]);
-                            unpack8_to_32<Add>(data.y, r[j + 4], r[j + 5], r[j + 6], r[j + 7]);
+                            unpack8_to_32<Add>(data.x, r[j], r[j + 1]);
+                            unpack8_to_32<Add>(data.y, r[j + 2], r[j + 3]);
                         }
                     }))
                 }
@@ -368,12 +363,12 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     const int16_t* weights = &transformer->weights[index * L1Size];
                     SWITCH_REG_HALFKA({
                         _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                               i += vectorLoadStride, j += 8) {
+                                               i += vectorLoadStride, j += 4) {
                             int4 data = *(int4*) &weights[i];
-                            unpack16_to_32<Sub>(data.x, r[j], r[j + 1]);
-                            unpack16_to_32<Sub>(data.y, r[j + 2], r[j + 3]);
-                            unpack16_to_32<Sub>(data.z, r[j + 4], r[j + 5]);
-                            unpack16_to_32<Sub>(data.w, r[j + 6], r[j + 7]);
+                            unpack16_to_32<Sub>(data.x, r[j]);
+                            unpack16_to_32<Sub>(data.y, r[j + 1]);
+                            unpack16_to_32<Sub>(data.z, r[j + 2]);
+                            unpack16_to_32<Sub>(data.w, r[j + 3]);
                         }
                     })
                 }
@@ -382,10 +377,10 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     const int8_t* weights = &transformer->threatWeights[index * L1Size];
                     SWITCH_REG_THREATS(({
                         _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                               i += vectorLoadStride, j += 8) {
+                                               i += vectorLoadStride, j += 4) {
                             int2 data = *(int2*) &weights[i];
-                            unpack8_to_32<Sub>(data.x, r[j], r[j + 1], r[j + 2], r[j + 3]);
-                            unpack8_to_32<Sub>(data.y, r[j + 4], r[j + 5], r[j + 6], r[j + 7]);
+                            unpack8_to_32<Sub>(data.x, r[j], r[j + 1]);
+                            unpack8_to_32<Sub>(data.y, r[j + 2], r[j + 3]);
                         }
                     }))
                 }
@@ -451,12 +446,12 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 {
                     SWITCH_REG_HALFKA({
                         _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                               i += vectorLoadStride, j += 8) {
+                                               i += vectorLoadStride, j += 4) {
                             int4 data = *(int4*) &transformer->biases.data()[i];
-                            unpack16_to_32<Store>(data.x, r[j + 0], r[j + 1]);
-                            unpack16_to_32<Store>(data.y, r[j + 2], r[j + 3]);
-                            unpack16_to_32<Store>(data.z, r[j + 4], r[j + 5]);
-                            unpack16_to_32<Store>(data.w, r[j + 6], r[j + 7]);
+                            unpack16_to_32<Store>(data.x, r[j + 0]);
+                            unpack16_to_32<Store>(data.y, r[j + 1]);
+                            unpack16_to_32<Store>(data.z, r[j + 2]);
+                            unpack16_to_32<Store>(data.w, r[j + 3]);
                         }
                     })
                 }

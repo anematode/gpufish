@@ -79,7 +79,8 @@ void permute(std::array<T, N>& data, const std::array<std::size_t, OrderSize>& o
 
 void prepare_for_finalize(GPU::RegisterMachine*                          machine,
                           const AccumulatorState<Features::HalfKAv2_hm>& acc,
-                          const AccumulatorState<Features::FullThreats>& threatsAcc);
+                          const AccumulatorState<Features::FullThreats>& threatsAcc,
+                          Color c);
 
 // Input feature converter
 template<IndexType TransformedFeatureDimensions>
@@ -265,7 +266,6 @@ class FeatureTransformer {
 
         if (machine)
         {
-            prepare_for_finalize(machine, accumulatorState, threatAccumulatorState);
 #ifdef NO_CPU_EVAL
             return psqt;
 #endif

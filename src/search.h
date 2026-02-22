@@ -37,6 +37,7 @@
 #include "nnue/network.h"
 #include "nnue/nnue_accumulator.h"
 #include "numa.h"
+#include "coroutine.h"
 #include "position.h"
 #include "score.h"
 #include "syzygy/tbprobe.h"
@@ -332,9 +333,9 @@ class Worker {
     TTMoveHistory    ttMoveHistory;
     SharedHistories& sharedHistory;
 
-    CustomStack contextStack;
-    ucontext_t  activeContext;
-    bool        is_active;
+    CustomStack      contextStack;
+    CoroutineContext activeContext;
+    bool             is_active;
 
    public:
     void iterative_deepening();

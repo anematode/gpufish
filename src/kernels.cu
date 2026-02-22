@@ -242,11 +242,15 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
             myCmdBuffer[i] = instructionBuffer->list[i];
         }
 
+        __syncwarp();
+        Instruction nextInst = myCmdBuffer[0];
+
         for (uint32_t inst_i = 0; inst_i < instructionCount; ++inst_i)
         {
             __syncwarp();
 
-            Instruction inst = myCmdBuffer[inst_i];
+            Instruction inst = nextInst;
+            nextInst = myCmdBuffer[inst_i + 1];
 
             switch (inst.opcode())
             {

@@ -154,6 +154,7 @@ bool is_shuffling(Move move, Stack* const ss, const Position& pos) {
 }  // namespace
 
 Search::Worker::Worker(SharedState&              sharedState,
+                       GPU::RegisterMachine*     machine,
                        ISearchManager&           sm,
                        size_t                    threadId,
                        size_t                    workerId,
@@ -174,7 +175,8 @@ Search::Worker::Worker(SharedState&              sharedState,
     tt(sharedState.tt),
     networks(sharedState.networks),
     refreshTable(networks[token]),
-    myThread(ownerThread) {
+    myThread(ownerThread),
+    registerMachine(machine) {
     clear();
 }
 
@@ -189,11 +191,10 @@ bool Worker::yield_to_next() {
     // cycle through other threads to find a yield target
     for (size_t i = 1; i < thread->workers.size(); i++)
     {
-        size_t index       = (workerIdx + i) % thread->workers.size();
-        auto&  next_thread = thread->workers[index];
-        if (next_thread->is_active)
-        {
-            activeContext.switch_to(next_thread->activeContext);
+        size_t index = (workerIdx + i) % thread->workers.size();
+        auto* worker = thread->workers[index].get();
+        if (worker->is_active && (StrictRR || worker->registerMachine->ready())) {
+            activeContext.switch_to(worker->activeContext);
             return true;
         }
     }
@@ -208,7 +209,14 @@ void Worker::join_all_other_workers() {
 }
 
 void Search::Worker::start_searching() {
-    accumulatorStack.reset();
+    uint32_t idx = 0;
+    refreshTable.assign_indices(idx);
+    accumulatorStack.reset(idx);
+
+    accumulatorStack.machine = registerMachine;
+
+    int maxBucket = (rootPos.count<ALL_PIECES>() - 1) / 4;
+    registerMachine->submit(GPU::Instruction::preload_l1_buckets(maxBucket));
 
     // Non-main threads go directly to iterative_deepening()
     if (!is_mainthread())
@@ -216,8 +224,6 @@ void Search::Worker::start_searching() {
         iterative_deepening();
         return;
     }
-
-    // std::cout << "Main thread started searching!\n"; // todo: cleanup print debug messages in this function
 
     main_manager()->tm.init(limits, rootPos.side_to_move(), rootPos.game_ply(), options,
                             main_manager()->originalTimeAdjust);
@@ -233,7 +239,6 @@ void Search::Worker::start_searching() {
     {
         threads.start_searching();  // start non-main threads
         iterative_deepening();      // main thread start searching
-        // std::cout << "Main thread done with ID!\n";
     }
 
     // When we reach the maximum depth, we can arrive here without a raise of
@@ -267,8 +272,6 @@ void Search::Worker::start_searching() {
     if (int(options["MultiPV"]) == 1 && !limits.depth && !limits.mate && !skill.enabled()
         && rootMoves[0].pv[0] != Move::none())
         bestThread = threads.get_best_worker();
-
-    // std::cout << "Finalizing analysis in main thread!\n";
 
     main_manager()->bestPreviousScore        = bestThread->rootMoves[0].score;
     main_manager()->bestPreviousAverageScore = bestThread->rootMoves[0].averageScore;
@@ -644,6 +647,21 @@ void Search::Worker::clear() {
         reductions[i] = int(2747 / 128.0 * std::log(i));
 
     refreshTable.clear(networks[numaAccessToken]);
+
+    uint32_t idx = 0;
+    refreshTable.assign_indices(idx);
+    registerMachine->submit(GPU::Instruction::reset_reg(GPU::A));
+
+    for (auto& r : refreshTable.big.entries)
+    {
+        for (auto& ent : r)
+        {
+            registerMachine->submit(GPU::Instruction::store_scratch(ent.scratchIndex, GPU::A));
+        }
+    }
+
+    registerMachine->flush();
+    registerMachine->blockUntilComplete();
 }
 
 

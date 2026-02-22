@@ -40,8 +40,6 @@
 
 namespace Stockfish {
 
-const int WorkersPerThread = 8;
-
 // Constructor launches the thread and waits until it goes to sleep
 // in idle_loop(). Note that 'searching' and 'exit' should be already set.
 Thread::Thread(Search::SharedState&                    sharedState,
@@ -68,9 +66,11 @@ Thread::Thread(Search::SharedState&                    sharedState,
 
         for (int i = 0; i < WorkersPerThread; ++i)
         {
-            this->workers.push_back(
-              make_unique_large_page<Search::Worker>(sharedState, *searchManager, n, i, idxInNuma,
-                                                     totalNuma, this->numaAccessToken, this));
+            size_t                idxInCuda = WorkersPerThread * n + i;
+            GPU::RegisterMachine* machine   = sharedState.cudaContext->get_machine(idxInCuda);
+            this->workers.push_back(make_unique_large_page<Search::Worker>(
+              sharedState, machine, *searchManager, n, i, idxInNuma, totalNuma,
+              this->numaAccessToken, this));
         }
     });
 
@@ -268,6 +268,12 @@ void ThreadPool::set(const NumaConfig&                           numaConfig,
         auto threadsPerNode = counts;
         counts.clear();
 
+        cudaContext             = std::make_unique<GPU::CudaContext>(sharedState.networks->big,
+                                                                     requested * WorkersPerThread);
+        sharedState.cudaContext = cudaContext.get();
+        cudaContext
+          ->launch_persistent_kernel();  // needed for setup -- should probably have non-persistent option for setup
+
         while (threads.size() < requested)
         {
             const size_t    threadId      = threads.size();
@@ -297,6 +303,7 @@ void ThreadPool::set(const NumaConfig&                           numaConfig,
                 create_thread();
         }
 
+        cudaContext->stop_all();
         clear();
 
         main_thread()->wait_for_search_finished();
@@ -309,6 +316,7 @@ void ThreadPool::clear() {
     if (threads.size() == 0)
         return;
 
+    cudaContext->launch_persistent_kernel();
     for (auto&& th : threads)
         th->clear_worker();
 
@@ -323,6 +331,7 @@ void ThreadPool::clear() {
     main_manager()->bestPreviousScore  = VALUE_INFINITE;
     main_manager()->originalTimeAdjust = -1;
     main_manager()->tm.clear();
+    cudaContext->stop_all();
 }
 
 void ThreadPool::run_on_thread(size_t threadId, std::function<void()> f) {
@@ -401,6 +410,9 @@ void ThreadPool::start_thinking(const OptionsMap&  options,
     for (auto&& th : threads)
         th->wait_for_search_finished();
 
+    assert(cudaContext != nullptr);
+
+    cudaContext->launch_persistent_kernel();
     main_thread()->start_searching();
 }
 

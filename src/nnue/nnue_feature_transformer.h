@@ -77,6 +77,12 @@ void permute(std::array<T, N>& data, const std::array<std::size_t, OrderSize>& o
     }
 }
 
+void prepare_for_finalize(GPU::RegisterMachine*                          machine,
+                          const AccumulatorState<Features::HalfKAv2_hm>& acc,
+                          const AccumulatorState<Features::FullThreats>& threatsAcc,
+                          Color                                          c,
+                          Color                                          stm);
+
 // Input feature converter
 template<IndexType TransformedFeatureDimensions>
 class FeatureTransformer {
@@ -103,6 +109,7 @@ class FeatureTransformer {
     // be permuted so that calling packus on adjacent vectors of 16-bit
     // integers loaded from the data results in the pre-permutation order
     static constexpr auto PackusEpi16Order = []() -> std::array<std::size_t, 8> {
+        return {0, 2, 4, 6, 1, 3, 5, 7};
 #if defined(USE_AVX512)
         // _mm512_packus_epi16 after permutation:
         // |   0   |   2   |   4   |   6   | // Vector 0
@@ -230,7 +237,8 @@ class FeatureTransformer {
                            AccumulatorStack&                         accumulatorStack,
                            AccumulatorCaches::Cache<HalfDimensions>& cache,
                            OutputType*                               output,
-                           int                                       bucket) const {
+                           int                                       bucket,
+                           GPU::RegisterMachine*                     machine) const {
 
         using namespace SIMD;
         accumulatorStack.evaluate(pos, *this, cache);
@@ -256,6 +264,13 @@ class FeatureTransformer {
         const auto& accumulation = (accumulatorState.acc<HalfDimensions>()).accumulation;
         const auto& threatAccumulation =
           (threatAccumulatorState.acc<HalfDimensions>()).accumulation;
+
+        if (machine)
+        {
+#ifdef NO_CPU_EVAL
+            return psqt;
+#endif
+        }
 
         for (IndexType p = 0; p < 2; ++p)
         {

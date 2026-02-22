@@ -52,6 +52,8 @@ enum class EmbeddedNNUEType {
 
 using NetworkOutput = std::tuple<Value, Value>;
 
+using L1Bucket = Layers::AffineTransformSparseInput<TransformedFeatureDimensionsBig, 16>;
+
 // The network must be a trivial type, i.e. the memory must be in-line.
 // This is required to allow sharing the network via shared memory, as
 // there is no way to run destructors.
@@ -82,9 +84,20 @@ class Network {
 
 
     void verify(std::string evalfilePath, const std::function<void(std::string_view)>&) const;
-    NnueEvalTrace trace_evaluate(const Position&                         pos,
-                                 AccumulatorStack&                       accumulatorStack,
-                                 AccumulatorCaches::Cache<FTDimensions>& cache) const;
+    NnueEvalTrace      trace_evaluate(const Position&                         pos,
+                                      AccumulatorStack&                       accumulatorStack,
+                                      AccumulatorCaches::Cache<FTDimensions>& cache) const;
+    const Transformer& get_feature_transformer() const { return featureTransformer; }
+
+    std::vector<const L1Bucket*> get_sparse_buckets() const {
+        std::vector<const L1Bucket*> result;
+        for (const auto& arch : network)
+        {
+            result.push_back(&arch.fc_0);
+        }
+        return result;
+    }
+
 
    private:
     void load_user_net(const std::string&, const std::string&);

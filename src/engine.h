@@ -38,9 +38,9 @@
 #include "thread.h"
 #include "tt.h"
 #include "ucioption.h"
+#include "gpu.h"
 
 namespace Stockfish {
-
 class Engine {
    public:
     using InfoShort = Search::InfoShort;

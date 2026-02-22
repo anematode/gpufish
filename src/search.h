@@ -32,6 +32,7 @@
 #include <string_view>
 #include <vector>
 
+#include "gpu.h"
 #include "history.h"
 #include "misc.h"
 #include "nnue/network.h"
@@ -151,6 +152,7 @@ struct SharedState {
     ThreadPool&                                               threads;
     TranspositionTable&                                       tt;
     std::map<NumaIndex, SharedHistories>&                     sharedHistories;
+    GPU::CudaContext*                                         cudaContext;
     const LazyNumaReplicatedSystemWide<Eval::NNUE::Networks>& networks;
 };
 
@@ -296,6 +298,7 @@ struct CustomStack {
 class Worker {
    public:
     Worker(SharedState&,
+           GPU::RegisterMachine*,
            ISearchManager&,
            size_t,
            size_t,
@@ -402,6 +405,7 @@ class Worker {
     Eval::NNUE::AccumulatorStack  accumulatorStack;
     Eval::NNUE::AccumulatorCaches refreshTable;
     Thread*                       myThread;
+    GPU::RegisterMachine*         registerMachine;
 
     friend class Stockfish::ThreadPool;
     friend class SearchManager;

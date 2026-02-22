@@ -1,0 +1,190 @@
+//
+// Created by toystory on 2/7/26.
+//
+
+#ifndef GPUFISH_GPU_OPCODES_H
+#define GPUFISH_GPU_OPCODES_H
+
+#include <cassert>
+#include <cstdint>
+#include <cstddef>
+#include <string>
+
+#define ScratchRegCount 2048
+#define L1Size 1024
+#define MaxInstructionsCount 256
+#define ThreadsPerWarp 32
+
+namespace Stockfish::GPU {
+enum Opcode {
+    Nop = 0,
+    // reg = [mem]
+    LdScratch = 1,
+    // [mem] = reg
+    StScratch = 2,
+    // reg += [feature mem]
+    //    - if reg is A or B, the feature is a king buckets feature;
+    //    - if reg is C or D, the feature is a threat weights feature.
+    AddFeature = 3,
+    // reg -= [feature mem]
+    //    - like above
+    SubFeature = 4,
+    // output_buf = sparse_matrix_multiply(M[bucket], pairwise_fuse((A + C), (B + D)))
+    Finalize = 5,
+    // Exit instruction loop
+    Exit = 6,
+    // Fill register with biases
+    ResetReg = 7,
+    // Copy L1 buckets n:n-4 into shared memory. Should only be called with bucket index >= the bucket index of
+    // the root position.
+    PreloadL1Buckets = 8,
+    // Pack [A/C] into the first half of packed, or [B/D] into the second half of packed
+    Pack8 = 9,
+};
+
+enum Reg {
+    A = 0,
+    B = 0,  // TODO remove aliases B and D
+    C = 2,
+    D = 2
+};
+
+// "Register machine" architecture:
+//    - Two registers A, C, each of L1 size; these are volatile between machine swaps
+//    - Scratch space, each of L1 size, indexed up to 1024 -> used as AccumulatorStack
+//    - 64-byte output buffer for L2, shared with host
+// Each worker is given a separately allocated register machine
+
+struct Instruction {
+    uint32_t data;
+
+    static constexpr size_t OpcodeBits      = 4;
+    static constexpr size_t DataBits        = 13;
+    static constexpr size_t MaxMachineIndex = 1 << DataBits;
+    static constexpr size_t WideIndexBits   = 18;
+    static constexpr size_t RegIndexBits    = 2;
+    static constexpr size_t BucketBits      = 3;
+    static constexpr size_t MaxBucket       = 8;
+
+    std::string to_string() const {
+        std::string result = "";
+        switch (opcode())
+        {
+        case Nop :
+            result = "Nop";
+            break;
+        case LdScratch :
+            result = "LdScratch #" + std::to_string(decode_wide_index()) + reg_to_string();
+            break;
+        case StScratch :
+            result = "StScratch #" + std::to_string(decode_wide_index()) + reg_to_string();
+            break;
+        case AddFeature :
+            result = "AddFeature #" + std::to_string(decode_wide_index()) + reg_to_string();
+            break;
+        case SubFeature :
+            result = "SubFeature #" + std::to_string(decode_wide_index()) + reg_to_string();
+            break;
+        case Finalize :
+            result = "Finalize #" + std::to_string(decode_bucket());
+            break;
+        case PreloadL1Buckets :
+            result = "LoadL1Buckets #" + std::to_string(decode_bucket());
+            break;
+        case Exit :
+            result = "Exit";
+            break;
+        default :
+            result = "unknown";
+            break;
+        }
+        return result;
+    }
+
+    static constexpr Instruction preload_l1_buckets(int max_bucket) {
+        assert(max_bucket >= 0 && max_bucket <= 7);
+        return {uint32_t((max_bucket << OpcodeBits) + PreloadL1Buckets)};
+    }
+
+    static constexpr Instruction nop() { return {uint32_t(Nop)}; }
+
+    static constexpr void check_wide_index([[maybe_unused]] size_t idx) {
+        assert(idx < (1 << WideIndexBits));
+    }
+
+    static constexpr void check_reg([[maybe_unused]] size_t idx) {
+        assert(idx < (1 << RegIndexBits));
+    }
+
+    static constexpr Instruction make_mem_reg(Opcode opcode, Reg reg, size_t scratchIdx) {
+        check_wide_index(scratchIdx);
+        check_reg(reg);
+        return {
+          uint32_t((scratchIdx << (OpcodeBits + RegIndexBits)) + (reg << OpcodeBits) + opcode)};
+    }
+
+    static constexpr Instruction load_scratch(Reg regDst, size_t scratchSrc) {
+        return make_mem_reg(LdScratch, regDst, scratchSrc);
+    }
+
+    static constexpr Instruction store_scratch(size_t scratchDst, Reg regSrc) {
+        return make_mem_reg(StScratch, regSrc, scratchDst);
+    }
+
+    static constexpr Instruction add_feature(Reg regDst, size_t featureIndex) {
+        return make_mem_reg(AddFeature, regDst, featureIndex);
+    }
+
+    static constexpr Instruction sub_feature(Reg regDst, size_t featureIndex) {
+        return make_mem_reg(SubFeature, regDst, featureIndex);
+    }
+
+    static constexpr Instruction reset_reg(Reg regDst) {
+        return {uint32_t(ResetReg + (regDst << OpcodeBits))};
+    }
+
+    static constexpr Instruction finalize(size_t bucketIdx, bool stm) {
+        assert(bucketIdx < MaxBucket);
+        return {
+          uint32_t((stm << (OpcodeBits + BucketBits)) + (bucketIdx << OpcodeBits) + Finalize)};
+    }
+
+    static constexpr Instruction stop() { return {Exit}; }
+
+    static constexpr Instruction pack8(bool half) { return {uint32_t(half << OpcodeBits) + Pack8}; }
+
+    constexpr Opcode opcode() const { return Opcode(data & ((1 << OpcodeBits) - 1)); }
+
+    constexpr Reg decode_reg() const {
+        assert(opcode() == LdScratch || opcode() == StScratch || opcode() == AddFeature
+               || opcode() == SubFeature || opcode() == ResetReg);
+        return Reg(data >> OpcodeBits & 3);
+    }
+
+    constexpr uint32_t decode_wide_index() const {
+        assert(opcode() == LdScratch || opcode() == StScratch || opcode() == AddFeature
+               || opcode() == SubFeature);
+        return uint32_t(data >> (OpcodeBits + RegIndexBits)) & ((1 << WideIndexBits) - 1);
+    }
+
+    constexpr size_t decode_bucket() const {
+        assert(opcode() == Finalize || opcode() == PreloadL1Buckets);
+        return data >> OpcodeBits & 0x7;
+    }
+
+    constexpr bool side_to_move() const {
+        assert(opcode() == Finalize);
+        return bool(data >> (OpcodeBits + BucketBits) & 1);
+    }
+
+    constexpr bool decode_pack_half() const {
+        assert(opcode() == Pack8);
+        return data >> OpcodeBits & 1;
+    }
+
+   private:
+    std::string reg_to_string() const { return std::string(", ") + "ABCD"[decode_reg()]; }
+};
+}
+
+#endif  //GPUFISH_GPU_OPCODES_H

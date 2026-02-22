@@ -31,7 +31,7 @@ struct alignas(64) InstructionBuffer {
     }
 
     void set_instruction_count(uint16_t count) {
-        assert(get_instruction_count() < MaxInstructionsCount);
+        assert(get_instruction_count() < MaxInstructionsCount - 1);
         memcpy(&data, &count, 2);
     }
 
@@ -90,7 +90,7 @@ struct RegisterMachine {
         assert(isActive && "Register machine is inactive");
 
         int instrCount = staging.get_instruction_count();
-        if (__builtin_expect(instrCount >= MaxInstructionsCount, 0))
+        if (__builtin_expect(instrCount >= MaxInstructionsCount - 1, 0))
         {
             // Need an immediate flush before writing the next instruction.
             // Mainly used during setup, but important for correctness.

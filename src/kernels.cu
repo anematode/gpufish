@@ -229,6 +229,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
             }
             signal           = temp;
             instructionCount = signal & 0xffff;
+
+            myCmdBuffer[instructionCount] = Instruction::nop();
         }
 
         __syncwarp();
@@ -245,10 +247,11 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
             __syncwarp();
 
             Instruction inst = myCmdBuffer[inst_i];
+
             switch (inst.opcode())
             {
-            case SwitchMachine :
-                break;
+            case Nop :
+                continue;
             case PreloadL1Buckets : {
                 sharedBucketOffset = inst.decode_bucket() - SharedMemoryBuckets + 1;
 

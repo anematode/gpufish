@@ -17,7 +17,7 @@
 
 namespace Stockfish::GPU {
 enum Opcode {
-    SwitchMachine = 0,
+    Nop = 0,
     // reg = [mem]
     LdScratch = 1,
     // [mem] = reg
@@ -44,13 +44,13 @@ enum Opcode {
 
 enum Reg {
     A = 0,
-    B = 0,
+    B = 0,  // TODO remove aliases B and D
     C = 2,
     D = 2
 };
 
 // "Register machine" architecture:
-//    - Four registers A, B, C, D, each of L1 size; these are volatile between machine swaps
+//    - Two registers A, C, each of L1 size; these are volatile between machine swaps
 //    - Scratch space, each of L1 size, indexed up to 1024 -> used as AccumulatorStack
 //    - 64-byte output buffer for L2, shared with host
 // Each worker is given a separately allocated register machine
@@ -70,8 +70,8 @@ struct Instruction {
         std::string result = "";
         switch (opcode())
         {
-        case SwitchMachine :
-            result = "SwitchMachine";
+        case Nop :
+            result = "Nop";
             break;
         case LdScratch :
             result = "LdScratch #" + std::to_string(decode_wide_index()) + reg_to_string();
@@ -106,9 +106,8 @@ struct Instruction {
         return {uint32_t((max_bucket << OpcodeBits) + PreloadL1Buckets)};
     }
 
-    static constexpr Instruction switch_to_machine(size_t index) {
-        assert(index < (1 << DataBits));
-        return {uint32_t((index << OpcodeBits) + SwitchMachine)};
+    static constexpr Instruction nop() {
+        return { uint32_t(Nop) };
     }
 
     static constexpr void check_wide_index([[maybe_unused]] size_t idx) {
@@ -158,11 +157,6 @@ struct Instruction {
 
     constexpr Opcode opcode() const { return Opcode(data & ((1 << OpcodeBits) - 1)); }
 
-    constexpr uint32_t machine_index() const {
-        assert(opcode() == SwitchMachine);
-        return data >> OpcodeBits;
-    }
-
     constexpr Reg decode_reg() const {
         assert(opcode() == LdScratch || opcode() == StScratch || opcode() == AddFeature
                || opcode() == SubFeature || opcode() == ResetReg);
@@ -176,7 +170,7 @@ struct Instruction {
     }
 
     constexpr size_t decode_bucket() const {
-        assert(opcode() == Finalize || opcode() == LoadL1Buckets);
+        assert(opcode() == Finalize || opcode() == PreloadL1Buckets);
         return data >> OpcodeBits & 0x7;
     }
 

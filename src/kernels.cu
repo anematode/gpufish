@@ -409,33 +409,23 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     unsigned nnz1 = __ballot_sync(0xFFFFFFFF, packed[j]) & activeMask;
                     unsigned nnz2 = __ballot_sync(0xFFFFFFFF, packed[j + 1]) & activeMask;
 
-                    while (nnz1)
+                    auto process_nnz = [&] (unsigned& nnz, int q_offset)
                     {
-                        // Pop off the lowest bit
-                        // TODO: Consider further permuting the features so that packed[j] and packed[j+1] correlate
-                        int th_i = __ffs(nnz1) - 1;
-                        nnz1 &= nnz1 - 1;
+                        int th_i = __ffs(nnz) - 1;
+                        nnz &= nnz - 1;
 
-                        int selected = __shfl_sync(activeMask, packed[j], th_i);
+                        int selected = __shfl_sync(activeMask, packed[j + q_offset], th_i);
                         accumulation =
                           __dp4a(selected,
-                                 *((int*) &bucket->weights[64 * (q + 2 * th_i)] + (lane_id % 16)),
+                                 *((int*) &bucket->weights[64 * (q + q_offset + 2 * th_i)] + (lane_id % 16)),
                                  accumulation);
-                    }
+                    };
+
+                    while (nnz1)
+                        process_nnz(nnz1, 0);
 
                     while (nnz2)
-                    {
-                        // Pop off the lowest bit
-                        // TODO: Consider further permuting the features so that packed[j] and packed[j+1] correlate
-                        int th_i = __ffs(nnz2) - 1;
-                        nnz2 &= nnz2 - 1;
-
-                        int selected = __shfl_sync(activeMask, packed[j + 1], th_i);
-                        accumulation =
-                          __dp4a(selected,
-                                 *((int*) &bucket->weights[64 * (q + 1 + 2 * th_i)] + (lane_id % 16)),
-                                 accumulation);
-                    }
+                        process_nnz(nnz2, 1);
 
                     q += ThreadsPerWarp * 2;
                 }

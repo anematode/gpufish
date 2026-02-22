@@ -21,21 +21,15 @@
 
 #include <cstddef>
 
-/*
-
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__x86_64__)
     #define X86_64_COROUTINE_IMPL 1
 #else
     #define X86_64_COROUTINE_IMPL 0
 #endif
 
-*/
-
-#define X86_64_COROUTINE_IMPL 1 /* TODO: TEMPORARILY DISABLED */
-
 #if !X86_64_COROUTINE_IMPL
     #include <ucontext.h>
-#endif // !X86_64_COROUTINE_IMPL
+#endif  // !X86_64_COROUTINE_IMPL
 
 namespace Stockfish {
 
@@ -73,11 +67,11 @@ class CoroutineContext {
 
    private:
 #if X86_64_COROUTINE_IMPL
-    CoroutineContext* parentContext;
-    char* stack;
+    CoroutineContext*  parentContext;
+    char*              stack;
     CoroutineFunction* coroutineFunction;
-    int functionArgument;
-    void *instructionPointer;
+    int                functionArgument;
+    void*              instructionPointer;
 #else  // normal setcontext implementation
     ucontext_t context;
 #endif

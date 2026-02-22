@@ -16,7 +16,6 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-
 #include "coroutine.h"
 
 #include <cassert>
@@ -26,20 +25,18 @@
 #include <oneapi/tbb/detail/_task.h>
 
 namespace Stockfish {
-#if X86_64_COROUTINE_IMPL /* TODO: INCOMPLETE */
+#if X86_64_COROUTINE_IMPL
 
 CoroutineContext::CoroutineContext() {
-    parentContext = nullptr;
-    stack = nullptr;
-    coroutineFunction = nullptr;
+    parentContext      = nullptr;
+    stack              = nullptr;
+    coroutineFunction  = nullptr;
     instructionPointer = nullptr;
 }
 
 void CoroutineContext::init_from_current_context() {}
 
-void CoroutineContext::set_parent_context(CoroutineContext* parent) {
-    parentContext = parent;
-}
+void CoroutineContext::set_parent_context(CoroutineContext* parent) { parentContext = parent; }
 
 void CoroutineContext::set_stack_region(void* stackPointer, size_t stackSize) {
     auto addr = reinterpret_cast<uintptr_t>(stackPointer) + stackSize;
@@ -50,28 +47,30 @@ void CoroutineContext::set_stack_region(void* stackPointer, size_t stackSize) {
 
 void CoroutineContext::set_entry_point(CoroutineFunction* func, int invocationArgument) {
     coroutineFunction = func;
-    functionArgument = invocationArgument;
+    functionArgument  = invocationArgument;
 }
 
-#define ATTR_NO_CALLEE_SAVED /* empty, USE_NO_CALLEE_SAVED_ABI not defined */
-#if defined(__has_attribute)
-#if __has_attribute(no_callee_saved_registers) && (__GNUC__ >= 16) // nobody cares about clang!
-    #define USE_NO_CALLEE_SAVED_ABI
-    #undef ATTR_NO_CALLEE_SAVED
-    #define ATTR_NO_CALLEE_SAVED __attribute__((no_callee_saved_registers))
-#endif
-#endif
+    #define ATTR_NO_CALLEE_SAVED /* empty, USE_NO_CALLEE_SAVED_ABI not defined */
+    #if defined(__has_attribute)
+        #if __has_attribute(no_callee_saved_registers) \
+          && (__GNUC__ >= 16)  // nobody cares about clang!
+            #define USE_NO_CALLEE_SAVED_ABI
+            #undef ATTR_NO_CALLEE_SAVED
+            #define ATTR_NO_CALLEE_SAVED __attribute__((no_callee_saved_registers))
+        #endif
+    #endif
 
-extern "C" ATTR_NO_CALLEE_SAVED
-void coroutine_ctx_switch_no_save(CoroutineContext* self, CoroutineContext* target);
+extern "C" ATTR_NO_CALLEE_SAVED void coroutine_ctx_switch_no_save(CoroutineContext* self,
+                                                                  CoroutineContext* target);
 extern "C" /* normal calling convention */
-void coroutine_ctx_switch_save(CoroutineContext* self, CoroutineContext* target);
+  void
+  coroutine_ctx_switch_save(CoroutineContext* self, CoroutineContext* target);
 
 void CoroutineContext::switch_to(CoroutineContext& target) {
     #ifdef USE_NO_CALLEE_SAVED_ABI
-        coroutine_ctx_switch_no_save(this, &target); // gcc 15 doesn't do this properly bruh
+    coroutine_ctx_switch_no_save(this, &target);  // gcc 15 doesn't do this properly bruh
     #else
-        coroutine_ctx_switch_save(this, &target);
+    coroutine_ctx_switch_save(this, &target);
     #endif
 }
 

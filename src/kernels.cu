@@ -387,19 +387,6 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 break;
             }
             case Finalize : {
-                // If it's black to move, we need to swap perspectives; because of our register layout
-                // this is equivalent to exchanging the low and high halves within a thread
-                if (inst.side_to_move())
-                {
-#pragma unroll
-                    for (int i = 0; i < L1EntriesPerThreadSlice / 8; ++i)
-                    {
-                        int tmp = packed[i + L1EntriesPerThreadSlice / 8];
-                        packed[i + L1EntriesPerThreadSlice / 8] = packed[i];
-                        packed[i]                               = tmp;
-                    }
-                }
-
                 int                   bucketIndex = inst.decode_bucket();
                 Eval::NNUE::L1Bucket* bucket;
 

@@ -193,7 +193,10 @@ NetworkOutput Network<Arch, Transformer>::evaluate(const Position&   pos,
           GPU::Instruction::finalize(bucket, pos.side_to_move() == BLACK));
         worker->registerMachine->flush();
 
-        worker->yield_to_next();
+        do {
+            worker->yield_to_next();
+        } while (!worker->registerMachine->ready());
+
         worker->registerMachine->blockUntilComplete();
 
         auto       result     = worker->registerMachine->read_result();

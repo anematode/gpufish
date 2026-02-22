@@ -193,9 +193,9 @@ bool Worker::yield_to_next() {
     for (size_t i = 1; i < thread->workers.size(); i++)
     {
         size_t index = (workerIdx + i) % thread->workers.size();
-        if (thread->workers[index]->is_active)
-        {
-            swapcontext(&activeContext, &thread->workers[index]->activeContext);
+        auto* worker = thread->workers[index].get();
+        if (worker->is_active && (StrictRR || worker->registerMachine->ready())) {
+            swapcontext(&activeContext, &worker->activeContext);
             return true;
         }
     }

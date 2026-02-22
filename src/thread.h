@@ -37,7 +37,8 @@
 
 namespace Stockfish {
 
-const int WorkersPerThread = 1;
+const int WorkersPerThread = 16;
+const bool StrictRR = false;
 
 class OptionsMap;
 using Value = int;

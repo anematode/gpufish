@@ -37,8 +37,15 @@
 
 namespace Stockfish {
 
-const int WorkersPerThread = 16;
-const bool StrictRR = false;
+inline int parseInt(const char* str, int dflt)
+{
+    if (!str) return dflt;
+    int value = atoi(str);
+    return value > 0 ? value : dflt;
+}
+
+inline int WorkersPerThread = parseInt(getenv("WorkersPerThread"), 16);
+inline bool StrictRR = getenv("StrictRR");
 
 class OptionsMap;
 using Value = int;

@@ -68,6 +68,9 @@ UCIEngine::UCIEngine(int argc, char** argv) :
     engine(argv[0]),
     cli(argc, argv) {
 
+    print_info_string("StrictRR " + std::to_string(StrictRR));
+    print_info_string("WorkersPerThread " + std::to_string(WorkersPerThread));
+
     engine.get_options().add_info_listener([](const std::optional<std::string>& str) {
         if (str.has_value())
             print_info_string(*str);

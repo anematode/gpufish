@@ -1159,7 +1159,7 @@ icx-profile-use:
 	EXTRALDFLAGS='-fprofile-use ' \
 	all
 
-kernels.o: kernels.cu
+kernels.o: kernels.cu $(HEADERS)
 	nvcc -c kernels.cu -o kernels.o -O3 --expt-relaxed-constexpr -arch=compute_75 -DNDEBUG -Xptxas=-v
 
 

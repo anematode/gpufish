@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <memory>
+#include <cuda_pipeline.h>
 
 #include <thread>
 #include "nnue/network.h"
@@ -239,8 +240,11 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
         // Copy instructions into shared memory
         for (uint32_t i = lane_id; i < instructionCount; i += ThreadsPerWarp)
         {
-            myCmdBuffer[i] = instructionBuffer->list[i];
+            __pipeline_memcpy_async(&myCmdBuffer[i], &instructionBuffer->list[i], sizeof(Instruction));
         }
+
+        __pipeline_commit();
+        __pipeline_wait_prior(0);
 
         __syncwarp();
         Instruction nextInst = myCmdBuffer[0];

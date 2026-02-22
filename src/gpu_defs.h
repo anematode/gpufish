@@ -154,9 +154,7 @@ struct Instruction {
 
     static constexpr Instruction stop() { return {Exit}; }
 
-    static constexpr Instruction pack8(bool half) {
-        return { uint32_t(half << OpcodeBits) + Pack8 };
-    }
+    static constexpr Instruction pack8(bool half) { return {uint32_t(half << OpcodeBits) + Pack8}; }
 
     constexpr Opcode opcode() const { return Opcode(data & ((1 << OpcodeBits) - 1)); }
 

@@ -80,7 +80,7 @@ void permute(std::array<T, N>& data, const std::array<std::size_t, OrderSize>& o
 void prepare_for_finalize(GPU::RegisterMachine*                          machine,
                           const AccumulatorState<Features::HalfKAv2_hm>& acc,
                           const AccumulatorState<Features::FullThreats>& threatsAcc,
-                          Color c);
+                          Color                                          c);
 
 // Input feature converter
 template<IndexType TransformedFeatureDimensions>

@@ -22,7 +22,7 @@ static void gpuAssert(cudaError_t code, const char* file, int line) {
 
 namespace Stockfish::GPU {
 
-constexpr int WarpsPerThreadBlock = 8;
+constexpr int WarpsPerThreadBlock     = 8;
 constexpr int L1EntriesPerThreadSlice = L1Size / ThreadsPerWarp;
 // each unsigned contains two 16-bit values
 constexpr int PtxRegsPerThreadSlice = L1EntriesPerThreadSlice / 2;
@@ -118,11 +118,12 @@ __device__ void unpack16_to_32(unsigned i, unsigned& i1) {
     }
 }
 
-__device__ void cvt8_to_16(uint32_t data, uint32_t *l, uint32_t *h)
-{
+__device__ void cvt8_to_16(uint32_t data, uint32_t* l, uint32_t* h) {
     uint32_t lo, hi;
-    asm ("prmt.b32 %0,%2,0,0x9180;\n"
-         "prmt.b32 %1,%2,0,0xb3a2;" :  "=r"(lo), "=r"(hi) : "r"(data));
+    asm("prmt.b32 %0,%2,0,0x9180;\n"
+        "prmt.b32 %1,%2,0,0xb3a2;"
+        : "=r"(lo), "=r"(hi)
+        : "r"(data));
     *l = lo;
     *h = hi;
 }
@@ -175,7 +176,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
     auto*         buckets     = machine->weights->buckets;
 
     typedef unsigned reg_t[PtxRegsPerThreadSlice];
-    reg_t       regA, regC;
+    reg_t            regA, regC;
 
     // Pairwise multiplication values
     unsigned packed[L1EntriesPerThreadSlice / 4] = {0};
@@ -191,12 +192,14 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
 #define SWITCH_REG(X) \
     switch (inst.decode_reg()) \
     { \
-    case 0 : case 1: { \
+    case 0 : \
+    case 1 : { \
         auto& r = regA; \
         X; \
         break; \
     } \
-    case 2 : case 3: { \
+    case 2 : \
+    case 3 : { \
         auto& r = regC; \
         X; \
         break; \
@@ -206,21 +209,21 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
     };
 
 #define SWITCH_REG_HALFKA(X) \
-        auto& r = regA; \
-        X;
+    auto& r = regA; \
+    X;
 
 #define SWITCH_REG_THREATS(X) \
-        auto& r = regC; \
-        X;
+    auto& r = regC; \
+    X;
 
     constexpr int SharedMemoryBuckets = 4;
 
     __shared__ Eval::NNUE::L1Bucket bucketsShared[SharedMemoryBuckets];
     // bucketsShared[i - sharedBucketOffset], if in range, is buckets[i]
-    int                             sharedBucketOffset = 8;
+    int sharedBucketOffset = 8;
 
     __shared__ Instruction cmdBuffers[WarpsPerThreadBlock][MaxInstructionsCount];
-    Instruction* myCmdBuffer = cmdBuffers[warp_id % WarpsPerThreadBlock];
+    Instruction*           myCmdBuffer = cmdBuffers[warp_id % WarpsPerThreadBlock];
 
     while (true)
     {
@@ -281,10 +284,10 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
                                            i += vectorLoadStride, j += 4) {
                         int4 data = *(int4*) &scratch[i];
-                        r[j] = data.x;
-                        r[j + 1] = data.y;
-                        r[j + 2] = data.z;
-                        r[j + 3] = data.w;
+                        r[j]      = data.x;
+                        r[j + 1]  = data.y;
+                        r[j + 2]  = data.z;
+                        r[j + 3]  = data.w;
                     }
                 })
                 break;
@@ -295,42 +298,44 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
                                            i += vectorLoadStride, j += 4) {
                         int4 result;
-                        result.x = r[j];
-                        result.y = r[j + 1];
-                        result.z = r[j + 2];
-                        result.w = r[j + 3];
+                        result.x             = r[j];
+                        result.y             = r[j + 1];
+                        result.z             = r[j + 2];
+                        result.w             = r[j + 3];
                         *(int4*) &scratch[i] = result;
                     }
                 })
 
                 break;
             }
-            case Pack8: {
-                auto get = [&] (int i) {
-                    int j = i % 2 ? 1 : 17;
+            case Pack8 : {
+                auto get = [&](int i) {
+                    int j   = i % 2 ? 1 : 17;
                     int sum = int(regA[i / 2] << j) >> 17;
                     sum += int(regC[i / 2] << j) >> 17;
                     return sum;
                 };
 
-                auto apply = [&] (int p) {
-                    int      offset = p * (L1EntriesPerThreadSlice / 8);
+                auto apply = [&](int p) {
+                    int offset = p * (L1EntriesPerThreadSlice / 8);
                     for (int i = 0; i < L1EntriesPerThreadSlice / 8; ++i)
                         packed[offset + i] = 0;
 #pragma unroll
                     for (int i = 0; i < L1EntriesPerThreadSlice / 2; ++i)
                     {
                         int sum0 = std::clamp(get(i), 0, 255);
-                        int sum1 = std::clamp(get(i + L1EntriesPerThreadSlice / 2),
-                                              0, 255);
+                        int sum1 = std::clamp(get(i + L1EntriesPerThreadSlice / 2), 0, 255);
 
                         insert_byte(packed[offset + i / 4], unsigned(sum0 * sum1) / 512, i % 4);
                     }
                 };
 
-                if (inst.decode_pack_half()) {
+                if (inst.decode_pack_half())
+                {
                     apply(1);
-                } else {
+                }
+                else
+                {
                     apply(0);
                 }
                 break;
@@ -419,7 +424,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     bucket = &buckets[bucketIndex];
 
                 int accumulation = lane_id < 16 ? bucket->biases[lane_id] : 0;
-                
+
 #pragma unroll
                 for (int j = 0, q = lane_id >= 16; j < L1EntriesPerThreadSlice / 4; j += 2)
                 {

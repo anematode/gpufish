@@ -310,9 +310,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
             case Pack8 : {
                 auto get = [&](int i) {
                     int j   = i % 2 ? 1 : 17;
-                    int sum = int(regA[i / 2] << j) >> 17;
-                    sum += int(regC[i / 2] << j) >> 17;
-                    return sum;
+                    int sum = regA[i/2] + regC[i/2];
+                    return sum << j >> 17;
                 };
 
                 auto apply = [&](int p) {

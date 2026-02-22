@@ -62,11 +62,11 @@ struct RegisterMachine {
     void flush() {
         if (staging.get_instruction_count() == 0)
         {
-            result[0] = 0;  // prevent accidentally blocking with blockUntilComplete()
+            result[0] = result[16] = 0;  // prevent accidentally blocking with blockUntilComplete()
             return;
         }
 
-        std::fill_n(result, 16, INT_MIN);
+        std::fill_n(result, 32, INT_MIN);
         staging.flush(wcBuffer);
         std::fill_n(regStates, 4, -1);
     }
@@ -82,7 +82,10 @@ struct RegisterMachine {
         staging.set_instruction_count(0);
     }
 
-    [[nodiscard]] bool ready() const { return result[0] != INT_MIN; }
+    [[nodiscard]] bool ready() const
+    {
+        return result[0] != INT_MIN && result[16] != INT_MIN;
+    }
 
     // Marked always inline because we usually call with a constant instruction type, which allows
     // folding of the switc
@@ -129,8 +132,8 @@ struct RegisterMachine {
         return staging.list[staging.get_instruction_count() - 1];
     }
 
-    std::array<int32_t, 16> read_result() const {
-        std::array<int32_t, 16> r;
+    std::array<int32_t, 32> read_result() const {
+        std::array<int32_t, 32> r;
         memcpy(&r, const_cast<const int32_t*>(result), sizeof(r));
         return r;
     }
@@ -160,7 +163,7 @@ struct RegisterMachine {
     // Result is written here by GPU. So that we keep the transfer to 64 bytes, we repurpose
     // result[i] == INT_MIN to mean "not (yet) written", and rely on 4-byte stores (at least) to
     // be atomic.
-    alignas(64) volatile int32_t result[16];
+    alignas(64) volatile int32_t result[32];
 
     // Shared weights
     const WeightsData* weights;

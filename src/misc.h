@@ -37,6 +37,10 @@
 #include <type_traits>
 #include <vector>
 
+#if !defined(NO_PREFETCH) && (defined(_MSC_VER) || defined(__INTEL_COMPILER))
+    #include <immintrin.h>
+#endif
+
 #define stringify2(x) #x
 #define stringify(x) stringify2(x)
 
@@ -46,10 +50,67 @@ std::string engine_version_info();
 std::string engine_info(bool to_uci = false);
 std::string compiler_info();
 
-// Preloads the given address in L1/L2 cache. This is a non-blocking
+// Prefetch hint enums for explicit call-site control.
+enum class PrefetchRw {
+    READ,
+    WRITE
+};
+
+// NOTE: PrefetchLoc controls locality / cache level, not whether a prefetch
+//       is issued. In particular, PrefetchLoc::NONE maps to a non-temporal /
+//       lowest-locality prefetch (Intel: _MM_HINT_NTA, GCC/Clang: locality = 0)
+//       and therefore still performs a prefetch. To completely disable
+//       prefetching, define NO_PREFETCH so that prefetch() becomes a no-op.
+enum class PrefetchLoc {
+    NONE,      // Non-temporal / no cache locality (still issues a prefetch)
+    LOW,       // Low locality (e.g. T2 / L2)
+    MODERATE,  // Moderate locality (e.g. T1 / L1)
+    HIGH       // High locality (e.g. T0 / closest cache)
+};
+
+// Preloads the given address into cache. This is a non-blocking
 // function that doesn't stall the CPU waiting for data to be loaded from memory,
 // which can be quite slow.
-void prefetch(const void* addr);
+#ifdef NO_PREFETCH
+template<PrefetchRw RW = PrefetchRw::READ, PrefetchLoc LOC = PrefetchLoc::HIGH>
+void prefetch(const void*) {}
+#elif defined(_MSC_VER) || defined(__INTEL_COMPILER)
+
+constexpr int get_intel_hint(PrefetchRw rw, PrefetchLoc loc) {
+    if (rw == PrefetchRw::WRITE)
+    {
+    #ifdef _MM_HINT_ET0
+        return _MM_HINT_ET0;
+    #else
+        // Fallback when write-prefetch hint is not available: use T0
+        return _MM_HINT_T0;
+    #endif
+    }
+    switch (loc)
+    {
+    case PrefetchLoc::NONE :
+        return _MM_HINT_NTA;
+    case PrefetchLoc::LOW :
+        return _MM_HINT_T2;
+    case PrefetchLoc::MODERATE :
+        return _MM_HINT_T1;
+    case PrefetchLoc::HIGH :
+        return _MM_HINT_T0;
+    default :
+        return _MM_HINT_T0;
+    }
+}
+
+template<PrefetchRw RW = PrefetchRw::READ, PrefetchLoc LOC = PrefetchLoc::HIGH>
+void prefetch(const void* addr) {
+    _mm_prefetch(static_cast<const char*>(addr), get_intel_hint(RW, LOC));
+}
+#else
+template<PrefetchRw RW = PrefetchRw::READ, PrefetchLoc LOC = PrefetchLoc::HIGH>
+void prefetch(const void* addr) {
+    __builtin_prefetch(addr, static_cast<int>(RW), static_cast<int>(LOC));
+}
+#endif
 
 void start_logger(const std::string& fname);
 
@@ -306,14 +367,7 @@ inline uint64_t mul_hi64(uint64_t a, uint64_t b) {
 #endif
 }
 
-inline std::uint64_t hash_bytes(const char* data, std::size_t size) {
-    // FNV-1a 64-bit
-    const char*   p = data;
-    std::uint64_t h = 14695981039346656037ull;
-    for (std::size_t i = 0; i < size; ++i)
-        h = (h ^ p[i]) * 1099511628211ull;
-    return h;
-}
+uint64_t hash_bytes(const char*, size_t);
 
 template<typename T>
 inline std::size_t get_raw_data_hash(const T& value) {
@@ -444,7 +498,9 @@ void move_to_front(std::vector<T>& vec, Predicate pred) {
     #define sf_always_inline
 #endif
 
-#if defined(__GNUC__) && !defined(__clang__)
+#if defined(__clang__)
+    #define sf_assume(cond) __builtin_assume(cond)
+#elif defined(__GNUC__)
     #if __GNUC__ >= 13
         #define sf_assume(cond) __attribute__((assume(cond)))
     #else
@@ -455,9 +511,19 @@ void move_to_front(std::vector<T>& vec, Predicate pred) {
                     __builtin_unreachable(); \
             } while (0)
     #endif
+#elif defined(_MSC_VER)
+    #define sf_assume(cond) __assume(cond)
 #else
     // do nothing for other compilers
     #define sf_assume(cond)
+#endif
+
+#ifdef __GNUC__
+    #define sf_unreachable() __builtin_unreachable()
+#elif defined(_MSC_VER)
+    #define sf_unreachable() __assume(0)
+#else
+    #define sf_unreachable()
 #endif
 
 }  // namespace Stockfish

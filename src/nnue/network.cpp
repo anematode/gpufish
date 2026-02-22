@@ -187,6 +187,7 @@ NetworkOutput Network<Arch, Transformer>::evaluate(const Position&   pos,
       featureTransformer.transform(pos, accumulatorStack, cache, transformedFeatures, bucket,
                                    worker ? worker->registerMachine : nullptr);
 
+#ifdef NO_CPU_EVAL
     if (worker)
     {
         worker->registerMachine->submit(
@@ -201,6 +202,7 @@ NetworkOutput Network<Arch, Transformer>::evaluate(const Position&   pos,
         return {static_cast<Value>(psqt / OutputScale),
                 static_cast<Value>(positional / OutputScale)};
     }
+#endif
 
     const auto positional = network[bucket].propagate(transformedFeatures);
     return {static_cast<Value>(psqt / OutputScale), static_cast<Value>(positional / OutputScale)};

@@ -41,7 +41,7 @@ using PSQFeatureSet    = Features::HalfKAv2_hm;
 
 // Number of input feature dimensions after conversion
 constexpr IndexType TransformedFeatureDimensionsBig = 1024;
-constexpr int       L2Big                           = 15;
+constexpr int       L2Big                           = 31;
 constexpr int       L3Big                           = 32;
 
 constexpr IndexType TransformedFeatureDimensionsSmall = 128;
@@ -125,7 +125,7 @@ struct NetworkArchitecture {
         fc_0.propagate(transformedFeatures, buffer.fc_0_out);
         if (buf)
         {
-            std::copy_n(buffer.fc_0_out, 16, buf);
+            std::copy_n(buffer.fc_0_out, 32, buf);
         }
         ac_sqr_0.propagate(buffer.fc_0_out, buffer.ac_sqr_0_out);
         ac_0.propagate(buffer.fc_0_out, buffer.ac_0_out);
@@ -144,7 +144,7 @@ struct NetworkArchitecture {
         return outputValue;
     }
 
-    std::int32_t propagate_later(const std::array<int32_t, 16>& data) const {
+    std::int32_t propagate_later(const std::array<int32_t, 32>& data) const {
         struct alignas(CacheLineSize) Buffer {
             alignas(CacheLineSize) typename decltype(ac_sqr_0)::OutputType
               ac_sqr_0_out[ceil_to_multiple<IndexType>(FC_0_OUTPUTS * 2, 32)];

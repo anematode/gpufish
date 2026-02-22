@@ -209,7 +209,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
         __builtin_unreachable(); \
     };
 
-    constexpr int SharedMemoryBuckets = 4;
+    constexpr int SharedMemoryBuckets = 2;
 
     __shared__ Eval::NNUE::L1Bucket bucketsShared[SharedMemoryBuckets];
     // bucketsShared[i - sharedBucketOffset], if in range, is buckets[i]
@@ -274,6 +274,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 if (lane_id == 0)
                 {
                     machine->result[0] = 0;
+                    machine->result[16] = 0;
                     __threadfence_system();
                 }
                 return;
@@ -401,24 +402,23 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 else
                     bucket = &buckets[bucketIndex];
 
-                int accumulation = lane_id < 16 ? bucket->biases[lane_id] : 0;
-                unsigned activeMask = lane_id < 16 ? 0xFFFF : 0xFFFF0000U;
+                int accumulation = bucket->biases[lane_id];
 
 #pragma unroll
                 for (int j = 0, q = 0; j < L1EntriesPerThreadSlice / 4; j += 2)
                 {
-                    unsigned nnz1 = __ballot_sync(0xFFFFFFFF, packed[j]) & activeMask;
-                    unsigned nnz2 = __ballot_sync(0xFFFFFFFF, packed[j + 1]) & activeMask;
+                    unsigned nnz1 = __ballot_sync(0xFFFFFFFF, packed[j]);
+                    unsigned nnz2 = __ballot_sync(0xFFFFFFFF, packed[j + 1]) ;
 
                     auto process_nnz = [&] (unsigned& nnz, int q_offset)
                     {
                         int th_i = __ffs(nnz) - 1;
                         nnz &= nnz - 1;
 
-                        int selected = __shfl_sync(activeMask, packed[j + q_offset], th_i);
+                        int selected = __shfl_sync(0xFFFFFFFF, packed[j + q_offset], th_i);
                         accumulation =
                           __dp4a(selected,
-                                 *((int*) &bucket->weights[64 * (q + q_offset + 2 * th_i)] + (lane_id % 16)),
+                                 *((int*) &bucket->weights[128 * (q + q_offset + 2 * th_i)] + lane_id),
                                  accumulation);
                     };
 
@@ -431,10 +431,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     q += ThreadsPerWarp * 2;
                 }
 
-                accumulation += __shfl_down_sync(0xFFFFFFFF, accumulation, 16);
-
-                if (lane_id < 16)
-                    machine->result[lane_id] = accumulation;
+                machine->result[lane_id] = accumulation;
                 __threadfence_system();  // tbh I don't understand why this is necessary but *shrug*
                 goto done;
             }
@@ -468,6 +465,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
         if (lane_id == 0)
         {
             machine->result[0] = 1;
+            machine->result[16] = 1;
             __threadfence_system();
         }
 

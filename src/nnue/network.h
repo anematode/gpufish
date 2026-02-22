@@ -52,7 +52,7 @@ enum class EmbeddedNNUEType {
 
 using NetworkOutput = std::tuple<Value, Value>;
 
-using L1Bucket = Layers::AffineTransformSparseInput<TransformedFeatureDimensionsBig, 16>;
+using L1Bucket = Layers::AffineTransformSparseInput<TransformedFeatureDimensionsBig, 32>;
 
 // The network must be a trivial type, i.e. the memory must be in-line.
 // This is required to allow sharing the network via shared memory, as

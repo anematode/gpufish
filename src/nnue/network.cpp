@@ -190,6 +190,10 @@ NetworkOutput Network<Arch, Transformer>::evaluate(const Position&   pos,
     if (worker)
     {
         worker->registerMachine->submit(
+        GPU::Instruction::pack8(false));
+        worker->registerMachine->submit(
+          GPU::Instruction::pack8(true));
+        worker->registerMachine->submit(
           GPU::Instruction::finalize(bucket, pos.side_to_move() == BLACK));
         worker->registerMachine->flush();
 

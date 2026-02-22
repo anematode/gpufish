@@ -38,6 +38,8 @@ enum Opcode {
     // Copy L1 buckets n:n-4 into shared memory. Should only be called with bucket index >= the bucket index of
     // the root position.
     PreloadL1Buckets = 8,
+    // Pack [A/C] into the first half of packed, or [B/D] into the second half of packed
+    Pack8 = 9,
 };
 
 enum Reg {
@@ -152,6 +154,10 @@ struct Instruction {
 
     static constexpr Instruction stop() { return {Exit}; }
 
+    static constexpr Instruction pack8(bool half) {
+        return { uint32_t(half << OpcodeBits) + Pack8 };
+    }
+
     constexpr Opcode opcode() const { return Opcode(data & ((1 << OpcodeBits) - 1)); }
 
     constexpr uint32_t machine_index() const {
@@ -168,7 +174,7 @@ struct Instruction {
     constexpr uint32_t decode_wide_index() const {
         assert(opcode() == LdScratch || opcode() == StScratch || opcode() == AddFeature
                || opcode() == SubFeature);
-        return uint32_t(data >> (OpcodeBits + RegIndexBits));
+        return uint32_t(data >> (OpcodeBits + RegIndexBits)) & ((1 << WideIndexBits) - 1);
     }
 
     constexpr size_t decode_bucket() const {
@@ -178,7 +184,12 @@ struct Instruction {
 
     constexpr bool side_to_move() const {
         assert(opcode() == Finalize);
-        return bool(data >> (OpcodeBits + BucketBits));
+        return bool(data >> (OpcodeBits + BucketBits) & 1);
+    }
+
+    constexpr bool decode_pack_half() const {
+        assert(opcode() == Pack8);
+        return data >> OpcodeBits & 1;
     }
 
    private:

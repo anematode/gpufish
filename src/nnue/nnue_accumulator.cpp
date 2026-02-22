@@ -163,13 +163,15 @@ void AccumulatorStack::evaluate(const Position&                       pos,
 
     evaluate_side<PSQFeatureSet>(WHITE, pos, featureTransformer, cache);
 
-    if (UseThreats)
+    if (UseThreats) {
         evaluate_side<ThreatFeatureSet>(WHITE, pos, featureTransformer, cache);
+    }
 
     evaluate_side<PSQFeatureSet>(BLACK, pos, featureTransformer, cache);
 
-    if (UseThreats)
+    if (UseThreats) {
         evaluate_side<ThreatFeatureSet>(BLACK, pos, featureTransformer, cache);
+    }
 }
 
 template<typename FeatureSet, IndexType Dimensions>

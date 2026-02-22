@@ -341,6 +341,32 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
 
                 break;
             }
+            case Pack8: {
+                auto to16 = [](int a) { return a << 16 >> 16; };
+
+                auto apply = [&] (reg_t src1, reg_t src2, int p) {
+                    int      offset = p * (L1EntriesPerThreadSlice / 8);
+                    for (int i = 0; i < L1EntriesPerThreadSlice / 8; ++i)
+                        packed[offset + i] = 0;
+#pragma unroll
+                    for (int i = 0; i < L1EntriesPerThreadSlice / 2; ++i)
+                    {
+                        int sum0 = std::clamp(to16(src1[i] + src2[i]), 0, 255);
+                        int sum1 = std::clamp(to16(src1[i + L1EntriesPerThreadSlice / 2]
+                                                   + src2[i + L1EntriesPerThreadSlice / 2]),
+                                              0, 255);
+
+                        insert_byte(packed[offset + i / 4], unsigned(sum0 * sum1) / 512, i % 4);
+                    }
+                };
+
+                if (inst.decode_pack_half()) {
+                    apply(regB, regD, 1);
+                } else {
+                    apply(regA, regC, 0);
+                }
+                break;
+            }
             case AddFeature : {
                 uint32_t index = inst.decode_wide_index();
                 if (is_halfka_reg(inst.decode_reg()))
@@ -402,30 +428,6 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 break;
             }
             case Finalize : {
-                // Reset regs
-                for (auto& p : packed)
-                    p = 0;
-
-                auto to16 = [](int a) { return a << 16 >> 16; };
-
-#pragma unroll
-                for (int p = 0; p < 2; ++p)
-                {
-                    int32_t* src1   = p ? regB : regA;
-                    int32_t* src2   = p ? regD : regC;
-                    int      offset = p * (L1EntriesPerThreadSlice / 8);
-#pragma unroll
-                    for (int i = 0; i < L1EntriesPerThreadSlice / 2; ++i)
-                    {
-                        int sum0 = std::clamp(to16(src1[i] + src2[i]), 0, 255);
-                        int sum1 = std::clamp(to16(src1[i + L1EntriesPerThreadSlice / 2]
-                                                   + src2[i + L1EntriesPerThreadSlice / 2]),
-                                              0, 255);
-
-                        insert_byte(packed[offset + i / 4], unsigned(sum0 * sum1) / 512, i % 4);
-                    }
-                }
-
                 // If it's black to move, we need to swap perspectives; because of our register layout
                 // this is equivalent to exchanging the low and high halves within a thread
                 if (inst.side_to_move())

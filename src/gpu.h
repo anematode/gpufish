@@ -124,6 +124,10 @@ struct RegisterMachine {
         staging.set_instruction_count(instrCount);
     }
 
+    Instruction& peek() {
+        assert(staging.get_instruction_count() > 0);
+        return staging.list[staging.get_instruction_count() - 1];
+    }
 
     std::array<int32_t, 16> read_result() const {
         std::array<int32_t, 16> r;

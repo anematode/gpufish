@@ -175,7 +175,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
     auto*         buckets     = machine->weights->buckets;
 
     typedef int reg_t[PtxRegsPerThreadSlice];
-    reg_t       regA, regB, regC, regD;
+    reg_t       regA, regC;
 
     // Pairwise multiplication values
     unsigned packed[L1EntriesPerThreadSlice / 4] = {0};
@@ -191,23 +191,13 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
 #define SWITCH_REG(X) \
     switch (inst.decode_reg()) \
     { \
-    case 0 : { \
+    case 0 : case 1: { \
         auto& r = regA; \
         X; \
         break; \
     } \
-    case 1 : { \
-        auto& r = regB; \
-        X; \
-        break; \
-    } \
-    case 2 : { \
+    case 2 : case 3: { \
         auto& r = regC; \
-        X; \
-        break; \
-    } \
-    case 3 : { \
-        auto& r = regD; \
         X; \
         break; \
     } \
@@ -216,38 +206,12 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
     };
 
 #define SWITCH_REG_HALFKA(X) \
-    switch (inst.decode_reg()) \
-    { \
-    case 0 : { \
         auto& r = regA; \
-        X; \
-        break; \
-    } \
-    case 1 : { \
-        auto& r = regB; \
-        X; \
-        break; \
-    } \
-    default : \
-        __builtin_unreachable(); \
-    };
+        X;
 
 #define SWITCH_REG_THREATS(X) \
-    switch (inst.decode_reg()) \
-    { \
-    case 2 : { \
         auto& r = regC; \
-        X; \
-        break; \
-    } \
-    case 3 : { \
-        auto& r = regD; \
-        X; \
-        break; \
-    } \
-    default : \
-        __builtin_unreachable(); \
-    };
+        X;
 
     constexpr int SharedMemoryBuckets = 4;
 
@@ -361,7 +325,7 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 };
 
                 if (inst.decode_pack_half()) {
-                    apply(regB, regD, 1);
+                    apply(regA, regC, 1);
                 } else {
                     apply(regA, regC, 0);
                 }

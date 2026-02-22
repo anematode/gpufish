@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
+#include <oneapi/tbb/detail/_task.h>
 
 namespace Stockfish {
 #if X86_64_COROUTINE_IMPL /* TODO: INCOMPLETE */
@@ -52,91 +53,26 @@ void CoroutineContext::set_entry_point(CoroutineFunction* func, int invocationAr
     functionArgument = invocationArgument;
 }
 
-/* CoroutineContext X86_64_COROUTINE_IMPL Fields:
- * CoroutineContext* parentContext;      // offset 0
- * char* stack;                          // offest 8
- * CoroutineFunction* coroutineFunction; // offset 16
- * int functionArgument;                 // offset 24
- * void *instructionPointer;             // offset 32
- */
+#define ATTR_NO_CALLEE_SAVED /* empty, USE_NO_CALLEE_SAVED_ABI not defined */
+#if defined(__has_attribute)
+#if __has_attribute(no_callee_saved_registers) && (__GNUC__ >= 16) // nobody cares about clang!
+    #define USE_NO_CALLEE_SAVED_ABI
+    #undef ATTR_NO_CALLEE_SAVED
+    #define ATTR_NO_CALLEE_SAVED __attribute__((no_callee_saved_registers))
+#endif
+#endif
 
-__attribute__ ((naked))
-// __attribute__ ((preserve_none))
-__attribute__ ((no_callee_saved_registers))
+extern "C" ATTR_NO_CALLEE_SAVED
+void coroutine_ctx_switch_no_save(CoroutineContext* self, CoroutineContext* target);
+extern "C" /* normal calling convention */
+void coroutine_ctx_switch_save(CoroutineContext* self, CoroutineContext* target);
+
 void CoroutineContext::switch_to(CoroutineContext& target) {
-    // ABI:
-    // rdi;  CoroutineContext* this
-    // rsi;  CoroutineContext* target
-    asm (
-        "movq  8(%rsi), %rdx; \n" // load target->stack into rdx
-        "movq 16(%rsi), %rbx; \n" // load target->coroutineFunction into rbx
-        "movl 24(%rsi), %ecx; \n" // load target->functionArgument into rcx
-        "test %rbx, %rbx; \n"
-        "jz 0f; \n" // if already been started, just switch to it
-            // otherwise, set up call stack for the target
-            "sub $16, %rdx; \n"
-            "movq %rsi, 8(%rdx); \n" // push CoroutineContext* target
-            "lea 2f(%rip), %rax; \n"
-            "movq %rax, 0(%rdx); \n" // push trampoline (ret addr)
-            "mov %rdx, %rax; \n"
-            "sub $8, %rdx; \n"
-            "movq %rax, 0(%rdx); \n" // push same stack addr (rbp)
-            "movq $0, 16(%rsi); \n" // store 0 into target->coroutineFunction
-            "movq %rbx, 32(%rsi); \n" // store rbx into target->instructionPointer
-            "movq  %rdx, 8(%rsi); \n" // store back into target->stack
-            // "ud2; \n"
-        "0: \n" // switch to the coroutine
-            "push %rbp; \n" // save rbp on our stack
-            "movq %rsp, 8(%rdi); \n" // store rsp in this->stack
-            "lea 1f(%rip), %rax; \n"
-            "movq %rax, 32(%rdi); \n" // store continuation addr in this->instructionPointer
-            "movq 8(%rsi), %rdx; \n"
-            "movq %rdx, %rsp; \n" // use target->stack as rsp
-            "pop %rbp; \n" // pop rbp from the new stack
-            "movq %rcx, %rdi; \n" // copy target->functionArgument into rdi
-            "movq 32(%rsi), %rbx; \n"
-            "jmp *%rbx; \n"  // jump to target->instructionPointer, start executing
-        "1: \n" // control flow returned from coroutine
-            // resume execution like normal
-            // "ud2; \n"
-            "ret; \n"
-        "2: \n" // the return trampoline
-            // jump to the ctx->parentContext, stored on the stack
-            "pop %rdi; \n" // load current context pointer into rdi
-            "movq $0, 32(%rdi); \n" // safety measure: clear instructionPointer
-            "movq 0(%rdi), %rsi; \n" // load parentContext into rsi
-            "movq 8(%rsi), %rdx; \n" // load parentContext->stack into rdx
-            "movq %rdx, %rsp; \n" // use parentContext->stack as rsp
-            "pop %rbp; \n" // pop rbp from the parent stack
-            "movq 32(%rsi), %rbx; \n" // load parentContext->instructionPointer into rbx
-            // "ud2; \n"
-            "jmp *%rbx; \n"  // jump to parentContext->instructionPointer, start executing
-    );
-
-    // if (target.coroutineFunction)
-    // {
-        // hasn't started executing target for the first time yet;
-        // on target stack
-        // push &target
-        // push ret address: trampoline
-        // push same stack addr: rbp
-        // set up the call stack for target, and arg in a temp1 register
-        // set target.instructionPointer = target.coroutineFunction
-        // set target.coroutineFunction to nullptr
-    // }
-
-    // load target.instructionPointer into a temp2 register
-    // push rbp to our stack
-    // save our rsp to this.stack
-    // save our rip to this.instructionPointer
-    // set stack to target.stack
-    // pop rbp
-    // put temp1 value into rdi register (call arg)
-    // start executing temp2 as rip
-
-    // trampoline(CoroutineContext* retContext /* on stack */) {
-    //     // load the retContext stack again and jump to it
-    // }
+    #ifdef USE_NO_CALLEE_SAVED_ABI
+        coroutine_ctx_switch_no_save(this, &target); // gcc 15 doesn't do this properly bruh
+    #else
+        coroutine_ctx_switch_save(this, &target);
+    #endif
 }
 
 #else  // normal setcontext implementation

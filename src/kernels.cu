@@ -208,14 +208,6 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
         __builtin_unreachable(); \
     };
 
-#define SWITCH_REG_HALFKA(X) \
-    auto& r = regA; \
-    X;
-
-#define SWITCH_REG_THREATS(X) \
-    auto& r = regC; \
-    X;
-
     constexpr int SharedMemoryBuckets = 4;
 
     __shared__ Eval::NNUE::L1Bucket bucketsShared[SharedMemoryBuckets];
@@ -331,13 +323,9 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 };
 
                 if (inst.decode_pack_half())
-                {
                     apply(1);
-                }
                 else
-                {
                     apply(0);
-                }
                 break;
             }
             case AddFeature : {
@@ -345,28 +333,24 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 if (is_halfka_reg(inst.decode_reg()))
                 {
                     const int16_t* weights = &transformer->weights[index * L1Size];
-                    SWITCH_REG_HALFKA({
-                        _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                               i += vectorLoadStride, j += 4) {
-                            int4 data = *(int4*) &weights[i];
-                            unpack16_to_32<Add>(data.x, r[j]);
-                            unpack16_to_32<Add>(data.y, r[j + 1]);
-                            unpack16_to_32<Add>(data.z, r[j + 2]);
-                            unpack16_to_32<Add>(data.w, r[j + 3]);
-                        }
-                    })
+#pragma unroll
+                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4) {
+                        int4 data = *(int4*) &weights[i];
+                        unpack16_to_32<Add>(data.x, regA[j]);
+                        unpack16_to_32<Add>(data.y, regA[j + 1]);
+                        unpack16_to_32<Add>(data.z, regA[j + 2]);
+                        unpack16_to_32<Add>(data.w, regA[j + 3]);
+                    }
                 }
                 else
                 {
                     const int8_t* weights = &transformer->threatWeights[index * L1Size];
-                    SWITCH_REG_THREATS(({
-                        _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                               i += vectorLoadStride, j += 4) {
-                            int2 data = *(int2*) &weights[i];
-                            unpack8_to_32<Add>(data.x, r[j], r[j + 1]);
-                            unpack8_to_32<Add>(data.y, r[j + 2], r[j + 3]);
-                        }
-                    }))
+#pragma unroll
+                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4) {
+                        int2 data = *(int2*) &weights[i];
+                        unpack8_to_32<Add>(data.x, regC[j], regC[j + 1]);
+                        unpack8_to_32<Add>(data.y, regC[j + 2], regC[j + 3]);
+                    }
                 }
                 break;
             }
@@ -375,28 +359,24 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 if (is_halfka_reg(inst.decode_reg()))
                 {
                     const int16_t* weights = &transformer->weights[index * L1Size];
-                    SWITCH_REG_HALFKA({
-                        _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                               i += vectorLoadStride, j += 4) {
-                            int4 data = *(int4*) &weights[i];
-                            unpack16_to_32<Sub>(data.x, r[j]);
-                            unpack16_to_32<Sub>(data.y, r[j + 1]);
-                            unpack16_to_32<Sub>(data.z, r[j + 2]);
-                            unpack16_to_32<Sub>(data.w, r[j + 3]);
-                        }
-                    })
+#pragma unroll
+                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4) {
+                        int4 data = *(int4*) &weights[i];
+                        unpack16_to_32<Sub>(data.x, regA[j]);
+                        unpack16_to_32<Sub>(data.y, regA[j + 1]);
+                        unpack16_to_32<Sub>(data.z, regA[j + 2]);
+                        unpack16_to_32<Sub>(data.w, regA[j + 3]);
+                    }
                 }
                 else
                 {
                     const int8_t* weights = &transformer->threatWeights[index * L1Size];
-                    SWITCH_REG_THREATS(({
-                        _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                               i += vectorLoadStride, j += 4) {
-                            int2 data = *(int2*) &weights[i];
-                            unpack8_to_32<Sub>(data.x, r[j], r[j + 1]);
-                            unpack8_to_32<Sub>(data.y, r[j + 2], r[j + 3]);
-                        }
-                    }))
+#pragma unroll
+                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4) {
+                        int2 data = *(int2*) &weights[i];
+                        unpack8_to_32<Sub>(data.x, regC[j], regC[j + 1]);
+                        unpack8_to_32<Sub>(data.y, regC[j + 2], regC[j + 3]);
+                    }
                 }
                 break;
             }
@@ -431,6 +411,8 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                     unsigned nnz = __ballot_sync(0xFFFFFFFF, packed[j] | packed[j + 1]);
                     while (nnz)
                     {
+                        // Pop off the lowest bit
+                        // TODO: Consider further permuting the features so that packed[j] and packed[j+1] correlate
                         int th_i = __ffs(nnz) - 1;
                         nnz &= nnz - 1;
 
@@ -458,22 +440,19 @@ persistent_kernel(RegisterMachine* machines, InstructionBuffer* buffers, int num
                 // Not performance critical, used just for resetting
                 if (is_halfka_reg(inst.decode_reg()))
                 {
-                    SWITCH_REG_HALFKA({
-                        _Pragma("unroll") for (int i = myL1Offset, j = 0; i < L1Size;
-                                               i += vectorLoadStride, j += 4) {
-                            int4 data = *(int4*) &transformer->biases.data()[i];
-                            unpack16_to_32<Store>(data.x, r[j + 0]);
-                            unpack16_to_32<Store>(data.y, r[j + 1]);
-                            unpack16_to_32<Store>(data.z, r[j + 2]);
-                            unpack16_to_32<Store>(data.w, r[j + 3]);
-                        }
-                    })
+#pragma unroll
+                    for (int i = myL1Offset, j = 0; i < L1Size; i += vectorLoadStride, j += 4) {
+                        int4 data = *(int4*) &transformer->biases.data()[i];
+                        unpack16_to_32<Store>(data.x, regA[j + 0]);
+                        unpack16_to_32<Store>(data.y, regA[j + 1]);
+                        unpack16_to_32<Store>(data.z, regA[j + 2]);
+                        unpack16_to_32<Store>(data.w, regA[j + 3]);
+                    }
                 }
                 else
                 {
-                    SWITCH_REG_THREATS({
-                        _Pragma("unroll") for (int i = 0; i < PtxRegsPerThreadSlice; i++) r[i] = 0;
-                    })
+#pragma unroll
+                    for (int i = 0; i < PtxRegsPerThreadSlice; i++) regC[i] = 0;
                 }
 
                 break;

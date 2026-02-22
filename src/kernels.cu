@@ -52,6 +52,13 @@ struct WeightsData {
         auto temp = std::make_unique<Eval::NNUE::BigFeatureTransformer>(transformer);
         temp->unpermute_weights();
 
+        // We need to mask out the high bit of each 16-bit halfKA weight/bias because this makes SWAR more efficient
+        // in the kernel
+        for (auto& w : temp->weights)
+            w &= 0x7fff;
+        for (auto& w : temp->biases)
+            w &= 0x7fff;
+
         checkError(cudaMalloc(&this->transformer, sizeof(*temp)));
         checkError(cudaMemcpy(this->transformer, &*temp, sizeof(*temp), cudaMemcpyHostToDevice));
 
@@ -92,16 +99,18 @@ enum ReduceOp {
 
 template<ReduceOp op>
 __device__ void unpack16_to_32(unsigned i, unsigned& i1) {
+    assert((i & 0x80008000) == 0);
+    assert((i1 & 0x80008000) == 0);
+
     switch (op)
     {
     case Add :
-        i1 &= 0x7fff7fff;
-        i1 += i & 0x7fff7fff;
+        i1 += i;
         i1 &= 0x7fff7fff;
         return;
     case Sub :
         i1 |= 0x80008000U;
-        i1 -= i & 0x7fff7fff;
+        i1 -= i;
         i1 &= 0x7fff7fff;
         return;
     case Store :
